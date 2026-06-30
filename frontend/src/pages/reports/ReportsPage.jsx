@@ -1,0 +1,247 @@
+import { useState, useMemo } from 'react';
+import {
+  Box,
+  Typography,
+  Button,
+  TextField,
+  Grid,
+  Tab,
+  Tabs,
+  Card,
+  CardContent,
+  Chip,
+} from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import HistoryIcon from '@mui/icons-material/History';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import { useSnackbar } from 'notistack';
+import { format } from 'date-fns';
+import { usePermissions } from '../../hooks/usePermissions';
+import { PERMISSIONS } from '../../constants';
+import {
+  useGetReportCatalogQuery,
+  useGetReportStatsQuery,
+  useGetReportHistoryQuery,
+  useGetFinancialReportQuery,
+  useGetOperationalReportQuery,
+  useExportReportMutation,
+} from '../../redux/api/reportsApi';
+import ReportCatalogGrid from '../../features/reports/components/ReportCatalogGrid';
+import FinancialReportPanel from '../../features/reports/components/FinancialReportPanel';
+import OperationalReportPanel from '../../features/reports/components/OperationalReportPanel';
+import { REPORT_TYPES } from '../../features/reports/utils/reportUtils';
+import ErrorState from '../../components/common/ErrorState';
+import StatCard from '../../features/dashboard/components/StatCard';
+
+const ReportsPage = () => {
+  const { enqueueSnackbar } = useSnackbar();
+  const { hasPermission } = usePermissions();
+  const canExport = hasPermission(PERMISSIONS.EXPORT_REPORTS);
+
+  const [tab, setTab] = useState(0);
+  const [previewType, setPreviewType] = useState(null);
+  const [exportingType, setExportingType] = useState(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyPageSize, setHistoryPageSize] = useState(10);
+
+  const dateParams = useMemo(
+    () => ({
+      from: dateFrom ? new Date(dateFrom).toISOString() : undefined,
+      to: dateTo ? new Date(dateTo).toISOString() : undefined,
+    }),
+    [dateFrom, dateTo]
+  );
+
+  const { data: catalogData, isError: catalogError, error: catalogErr, refetch: refetchCatalog } = useGetReportCatalogQuery();
+  const { data: statsData } = useGetReportStatsQuery();
+  const { data: historyData, isFetching: historyFetching } = useGetReportHistoryQuery(
+    { page: historyPage + 1, limit: historyPageSize, sort: 'createdAt:desc' },
+    { skip: tab !== 3 }
+  );
+  const { data: financialData, isLoading: financialLoading } = useGetFinancialReportQuery(dateParams, {
+    skip: tab !== 1 && previewType !== REPORT_TYPES.FINANCIAL,
+  });
+  const { data: operationalData, isLoading: operationalLoading } = useGetOperationalReportQuery(dateParams, {
+    skip: tab !== 2 && previewType !== REPORT_TYPES.OPERATIONAL,
+  });
+
+  const [exportReport] = useExportReportMutation();
+
+  const catalog = catalogData?.data || [];
+  const stats = statsData?.data;
+  const history = historyData?.data?.reports || [];
+  const historyPagination = historyData?.data?.pagination || {};
+
+  const handleExport = async (type) => {
+    if (!canExport) {
+      enqueueSnackbar('Export permission required', { variant: 'warning' });
+      return;
+    }
+    setExportingType(type);
+    try {
+      const blob = await exportReport({ type, ...dateParams }).unwrap();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${type}-report-${Date.now()}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      enqueueSnackbar('Report exported successfully', { variant: 'success' });
+    } catch (err) {
+      enqueueSnackbar(err?.data?.message || 'Export failed', { variant: 'error' });
+    } finally {
+      setExportingType(null);
+    }
+  };
+
+  const handlePreview = (type) => {
+    if (type === REPORT_TYPES.FINANCIAL) setTab(1);
+    else if (type === REPORT_TYPES.OPERATIONAL) setTab(2);
+    else if (type === REPORT_TYPES.FLEET_SUMMARY) {
+      enqueueSnackbar('Fleet summary is available via export or dashboard', { variant: 'info' });
+    }
+    setPreviewType(type);
+  };
+
+  const historyColumns = useMemo(
+    () => [
+      { field: 'reportNumber', headerName: 'Report #', width: 140 },
+      { field: 'title', headerName: 'Title', flex: 1, minWidth: 180 },
+      { field: 'type', headerName: 'Type', width: 130, valueGetter: (v) => v?.replace('_', ' ') },
+      { field: 'format', headerName: 'Format', width: 80 },
+      { field: 'recordCount', headerName: 'Records', width: 90 },
+      {
+        field: 'status',
+        headerName: 'Status',
+        width: 100,
+        renderCell: ({ value }) => (
+          <Chip label={value} size="small" color={value === 'completed' ? 'success' : 'error'} />
+        ),
+      },
+      {
+        field: 'generatedBy',
+        headerName: 'Generated By',
+        width: 140,
+        valueGetter: (value) => value?.name || '—',
+      },
+      {
+        field: 'createdAt',
+        headerName: 'Date',
+        width: 140,
+        valueFormatter: (value) => (value ? format(new Date(value), 'MMM d, yyyy HH:mm') : '—'),
+      },
+    ],
+    []
+  );
+
+  if (catalogError) {
+    return <ErrorState title="Failed to load reports" message={catalogErr?.data?.message} onRetry={refetchCatalog} />;
+  }
+
+  return (
+    <Box>
+      <Box display="flex" alignItems="center" justifyContent="space-between" mb={3} flexWrap="wrap" gap={2}>
+        <Typography variant="h4" fontWeight={700}>
+          Reports & Export
+        </Typography>
+        <Button startIcon={<RefreshIcon />} variant="outlined" onClick={refetchCatalog}>
+          Refresh
+        </Button>
+      </Box>
+
+      <Grid container spacing={2} mb={3}>
+        <Grid item xs={6} sm={3}>
+          <StatCard title="Available Reports" value={stats?.availableReports ?? catalog.length} icon={<AssessmentIcon />} color="#1565C0" />
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <StatCard title="Total Generated" value={stats?.totalGenerated ?? 0} icon={<HistoryIcon />} color="#7B1FA2" />
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <StatCard title="Last 30 Days" value={stats?.generatedLast30Days ?? 0} icon={<TrendingUpIcon />} color="#2E7D32" />
+        </Grid>
+        <Grid item xs={6} sm={3}>
+          <StatCard title="Report Types Used" value={stats?.byType?.length ?? 0} icon={<AssessmentIcon />} color="#ED6C02" />
+        </Grid>
+      </Grid>
+
+      <Box display="flex" gap={2} mb={2} flexWrap="wrap" alignItems="center">
+        <TextField
+          size="small"
+          type="date"
+          label="From"
+          InputLabelProps={{ shrink: true }}
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+        />
+        <TextField
+          size="small"
+          type="date"
+          label="To"
+          InputLabelProps={{ shrink: true }}
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+        />
+        {(dateFrom || dateTo) && (
+          <Button size="small" onClick={() => { setDateFrom(''); setDateTo(''); }}>
+            Clear Dates
+          </Button>
+        )}
+      </Box>
+
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
+        <Tab label="Report Catalog" />
+        <Tab label="Financial" />
+        <Tab label="Operational" />
+        <Tab label="Export History" />
+      </Tabs>
+
+      {tab === 0 && (
+        <ReportCatalogGrid
+          catalog={catalog}
+          onExport={handleExport}
+          onPreview={handlePreview}
+          exportingType={exportingType}
+          canExport={canExport}
+        />
+      )}
+
+      {tab === 1 && <FinancialReportPanel data={financialData?.data} isLoading={financialLoading} />}
+
+      {tab === 2 && <OperationalReportPanel data={operationalData?.data} isLoading={operationalLoading} />}
+
+      {tab === 3 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" fontWeight={600} gutterBottom>
+              Export History
+            </Typography>
+            <Box sx={{ height: 480 }}>
+              <DataGrid
+                rows={history}
+                columns={historyColumns}
+                getRowId={(row) => row.id}
+                loading={historyFetching}
+                paginationMode="server"
+                rowCount={historyPagination.total || 0}
+                paginationModel={{ page: historyPage, pageSize: historyPageSize }}
+                onPaginationModelChange={(model) => {
+                  setHistoryPage(model.page);
+                  setHistoryPageSize(model.pageSize);
+                }}
+                pageSizeOptions={[10, 25]}
+                disableRowSelectionOnClick
+                sx={{ bgcolor: 'background.paper', borderRadius: 2 }}
+              />
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+    </Box>
+  );
+};
+
+export default ReportsPage;
