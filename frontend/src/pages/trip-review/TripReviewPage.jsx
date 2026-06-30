@@ -1,0 +1,267 @@
+import { useMemo, useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Box,
+  Button,
+  Card,
+  Chip,
+  Grid,
+  InputAdornment,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import { DataGrid } from '@mui/x-data-grid';
+import SearchIcon from '@mui/icons-material/Search';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import RateReviewIcon from '@mui/icons-material/RateReview';
+import PendingActionsIcon from '@mui/icons-material/PendingActions';
+import { format } from 'date-fns';
+import { useGetPendingReviewTripsQuery, useGetTripStatsQuery } from '../../redux/api/tripsApi';
+import TripReviewDialog from '../../features/trips/components/TripReviewDialog';
+import {
+  statusColors,
+  statusLabels,
+  formatCurrency,
+  formatLocation,
+  formatDistance,
+} from '../../features/trips/utils/tripUtils';
+import ErrorState from '../../components/common/ErrorState';
+import StatCard from '../../features/dashboard/components/StatCard';
+
+const tripGridSx = {
+  height: '100%',
+  width: '100%',
+  maxWidth: '100%',
+  border: 'none',
+  bgcolor: 'background.paper',
+  '& .MuiDataGrid-columnHeaders': { bgcolor: 'background.default' },
+};
+
+const TripReviewPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
+  const [reviewTripId, setReviewTripId] = useState(null);
+
+  useEffect(() => {
+    const tripParam = searchParams.get('trip');
+    if (tripParam) {
+      setReviewTripId(tripParam);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
+  const { data: statsData, refetch: refetchStats } = useGetTripStatsQuery(undefined, {
+    refetchOnMountOrArgChange: true,
+    refetchOnFocus: true,
+  });
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
+  } = useGetPendingReviewTripsQuery({
+    page: page + 1,
+    limit: pageSize,
+    search: search || undefined,
+    sort: 'submittedAt:desc',
+  });
+
+  const trips = data?.data?.trips || [];
+  const pagination = data?.data?.pagination;
+  const stats = statsData?.data;
+
+  const columns = useMemo(
+    () => [
+      {
+        field: 'tripNumber',
+        headerName: 'Trip #',
+        flex: 1,
+        minWidth: 120,
+        renderCell: ({ row }) => (
+          <Typography variant="body2" fontWeight={700}>
+            {row.tripNumber}
+          </Typography>
+        ),
+      },
+      {
+        field: 'driver',
+        headerName: 'Driver',
+        flex: 1,
+        minWidth: 140,
+        valueGetter: (_, row) => row.driver?.name || '—',
+      },
+      {
+        field: 'vehicle',
+        headerName: 'Vehicle',
+        flex: 1,
+        minWidth: 120,
+        valueGetter: (_, row) => row.vehicle?.vehicleNumber || '—',
+      },
+      {
+        field: 'route',
+        headerName: 'Route',
+        flex: 1.5,
+        minWidth: 180,
+        valueGetter: (_, row) => `${formatLocation(row.origin)} → ${formatLocation(row.destination)}`,
+      },
+      {
+        field: 'distance',
+        headerName: 'Distance',
+        width: 100,
+        valueFormatter: (value) => formatDistance(value),
+      },
+      {
+        field: 'expenses',
+        headerName: 'Driver Expenses',
+        width: 130,
+        valueFormatter: (value) => formatCurrency(value),
+      },
+      {
+        field: 'submittedAt',
+        headerName: 'Submitted',
+        width: 150,
+        valueFormatter: (value) => (value ? format(new Date(value), 'MMM d, HH:mm') : '—'),
+      },
+      {
+        field: 'status',
+        headerName: 'Status',
+        width: 140,
+        renderCell: ({ value }) => (
+          <Chip label={statusLabels[value] || value} size="small" color={statusColors[value] || 'default'} />
+        ),
+      },
+      {
+        field: 'actions',
+        headerName: '',
+        width: 100,
+        sortable: false,
+        renderCell: ({ row }) => (
+          <Tooltip title="Review & close trip">
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<RateReviewIcon />}
+              onClick={() => setReviewTripId(row.id)}
+            >
+              Review
+            </Button>
+          </Tooltip>
+        ),
+      },
+    ],
+    []
+  );
+
+  return (
+    <Box>
+      <Box display="flex" alignItems="flex-start" justifyContent="space-between" mb={3} flexWrap="wrap" gap={2}>
+        <Box>
+          <Typography variant="h4" fontWeight={700} gutterBottom>
+            Trip Review
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Review driver-submitted trips, enter revenue and expenses, and close trips for reporting.
+          </Typography>
+        </Box>
+        <Button
+          startIcon={<RefreshIcon />}
+          variant="outlined"
+          onClick={() => {
+            refetch();
+            refetchStats();
+          }}
+          disabled={isFetching}
+        >
+          Refresh
+        </Button>
+      </Box>
+
+      <Grid container spacing={2} mb={3}>
+        <Grid item xs={12} sm={6} md={4}>
+          <StatCard
+            title="Pending Review"
+            value={stats?.pendingReview ?? 0}
+            icon={<PendingActionsIcon />}
+            color="#ED6C02"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4}>
+          <StatCard
+            title="Closed Trips"
+            value={stats?.completed ?? 0}
+            icon={<RateReviewIcon />}
+            color="#2E7D32"
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={4}>
+          <StatCard
+            title="Total Profit (Closed)"
+            value={formatCurrency(stats?.totalProfit)}
+            icon={<RateReviewIcon />}
+            color="#1565C0"
+          />
+        </Grid>
+      </Grid>
+
+      <Card sx={{ p: 2, mb: 2 }}>
+        <TextField
+          size="small"
+          placeholder="Search trip number, driver, route..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(0);
+          }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon fontSize="small" />
+              </InputAdornment>
+            ),
+          }}
+          sx={{ minWidth: 280 }}
+        />
+      </Card>
+
+      <Card sx={{ height: 520, p: 1 }}>
+        {isError ? (
+          <ErrorState title="Failed to load pending trips" onRetry={refetch} />
+        ) : (
+          <DataGrid
+            rows={trips}
+            columns={columns}
+            getRowId={(row) => row.id}
+            loading={isLoading || isFetching}
+            rowCount={pagination?.total ?? 0}
+            paginationMode="server"
+            paginationModel={{ page, pageSize }}
+            onPaginationModelChange={(model) => {
+              setPage(model.page);
+              setPageSize(model.pageSize);
+            }}
+            pageSizeOptions={[10, 25, 50]}
+            disableRowSelectionOnClick
+            sx={tripGridSx}
+            onRowDoubleClick={(params) => setReviewTripId(params.row.id)}
+          />
+        )}
+      </Card>
+
+      <TripReviewDialog
+        open={Boolean(reviewTripId)}
+        tripId={reviewTripId}
+        onClose={() => setReviewTripId(null)}
+        onReviewed={() => {
+          refetch();
+          refetchStats();
+        }}
+      />
+    </Box>
+  );
+};
+
+export default TripReviewPage;

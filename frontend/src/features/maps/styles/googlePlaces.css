@@ -1,0 +1,4 @@
+/* Google Places dropdown must sit above MUI Dialog (z-index 1300) */
+.pac-container {
+  z-index: 1500 !important;
+}
