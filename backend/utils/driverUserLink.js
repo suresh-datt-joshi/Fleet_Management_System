@@ -51,4 +51,29 @@ export const getDriverIdForUser = async (userId) => {
   return byEmail._id;
 };
 
-export default { linkDriverProfileToUser, linkUserToDriverProfile, getDriverIdForUser };
+export const getUserIdForDriver = async (driverId) => {
+  if (!driverId) return null;
+
+  const driver = await Driver.findOne({ _id: driverId, isDeleted: false }).select('user email');
+  if (!driver) return null;
+
+  if (driver.user) return driver.user;
+
+  if (driver.email) {
+    const user = await User.findOne({
+      email: driver.email.toLowerCase(),
+      role: USER_ROLES.DRIVER,
+      isDeleted: false,
+    }).select('_id');
+
+    if (user) {
+      driver.user = user._id;
+      await driver.save({ validateBeforeSave: false });
+      return user._id;
+    }
+  }
+
+  return null;
+};
+
+export default { linkDriverProfileToUser, linkUserToDriverProfile, getDriverIdForUser, getUserIdForDriver };

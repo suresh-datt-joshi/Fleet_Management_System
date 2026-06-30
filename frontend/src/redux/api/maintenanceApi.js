@@ -34,6 +34,29 @@ export const maintenanceApi = baseApi.injectEndpoints({
             ]
           : [{ type: 'Maintenance', id: 'LIST' }],
     }),
+    getMyAssignedMaintenance: builder.query({
+      query: (params) => ({
+        url: '/maintenance/me/assigned',
+        params,
+      }),
+      providesTags: (result) =>
+        result?.data?.records
+          ? [
+              ...result.data.records.map(({ id }) => ({ type: 'Maintenance', id })),
+              { type: 'Maintenance', id: 'MY_ASSIGNED' },
+            ]
+          : [{ type: 'Maintenance', id: 'MY_ASSIGNED' }],
+    }),
+    getVehicleMaintenanceLogs: builder.query({
+      query: ({ vehicleId, ...params }) => ({
+        url: `/maintenance/vehicle/${vehicleId}/logs`,
+        params,
+      }),
+      providesTags: (result, error, { vehicleId }) => [
+        { type: 'Maintenance', id: `VEHICLE_${vehicleId}` },
+        { type: 'Maintenance', id: 'LOGS' },
+      ],
+    }),
     getMaintenanceRecord: builder.query({
       query: (id) => `/maintenance/${id}`,
       providesTags: (result, error, id) => [{ type: 'Maintenance', id }],
@@ -62,6 +85,7 @@ export const maintenanceApi = baseApi.injectEndpoints({
         { type: 'Maintenance', id: 'STATS' },
         { type: 'Maintenance', id: 'UPCOMING' },
         { type: 'Maintenance', id: 'ANALYTICS' },
+        { type: 'Maintenance', id: 'MY_ASSIGNED' },
         'Dashboard',
         'Vehicle',
       ],
@@ -76,6 +100,9 @@ export const maintenanceApi = baseApi.injectEndpoints({
         { type: 'Maintenance', id },
         { type: 'Maintenance', id: 'LIST' },
         { type: 'Maintenance', id: 'STATS' },
+        { type: 'Maintenance', id: 'MY_ASSIGNED' },
+        { type: 'MaintenanceHistory', id },
+        'Dashboard',
       ],
     }),
     deleteMaintenance: builder.mutation({
@@ -87,17 +114,19 @@ export const maintenanceApi = baseApi.injectEndpoints({
         { type: 'Maintenance', id: 'LIST' },
         { type: 'Maintenance', id: 'STATS' },
         { type: 'Maintenance', id: 'UPCOMING' },
+        { type: 'Maintenance', id: 'MY_ASSIGNED' },
       ],
     }),
     assignMechanic: builder.mutation({
-      query: ({ id, mechanicId }) => ({
+      query: ({ id, mechanicId, mechanicIds }) => ({
         url: `/maintenance/${id}/assign`,
         method: 'POST',
-        body: { mechanicId },
+        body: mechanicIds ? { mechanicIds } : { mechanicId },
       }),
       invalidatesTags: (result, error, { id }) => [
         { type: 'Maintenance', id },
         { type: 'Maintenance', id: 'LIST' },
+        { type: 'Maintenance', id: 'MY_ASSIGNED' },
         { type: 'MaintenanceHistory', id },
       ],
     }),
@@ -110,22 +139,43 @@ export const maintenanceApi = baseApi.injectEndpoints({
         { type: 'Maintenance', id },
         { type: 'Maintenance', id: 'LIST' },
         { type: 'Maintenance', id: 'STATS' },
+        { type: 'Maintenance', id: 'MY_ASSIGNED' },
         { type: 'MaintenanceHistory', id },
         'Vehicle',
         'Dashboard',
       ],
     }),
     completeMaintenance: builder.mutation({
-      query: ({ id, ...body }) => ({
-        url: `/maintenance/${id}/complete`,
-        method: 'POST',
-        body,
-      }),
-      invalidatesTags: (result, error, { id }) => [
+      queryFn: async ({ id, files = [], ...fields }) => {
+        try {
+          const formData = new FormData();
+          files.forEach((file) => formData.append('documents', file));
+          Object.entries(fields).forEach(([key, value]) => {
+            if (value !== undefined && value !== null && value !== '') {
+              formData.append(key, typeof value === 'object' ? JSON.stringify(value) : value);
+            }
+          });
+          const { data } = await axiosInstance.post(`/maintenance/${id}/complete`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          return { data };
+        } catch (error) {
+          return {
+            error: {
+              status: error.response?.status,
+              data: error.response?.data || error.message,
+            },
+          };
+        }
+      },
+      invalidatesTags: (result, error, { id, vehicleId }) => [
         { type: 'Maintenance', id },
         { type: 'Maintenance', id: 'LIST' },
         { type: 'Maintenance', id: 'STATS' },
         { type: 'Maintenance', id: 'ANALYTICS' },
+        { type: 'Maintenance', id: 'MY_ASSIGNED' },
+        { type: 'Maintenance', id: 'LOGS' },
+        ...(vehicleId ? [{ type: 'Maintenance', id: `VEHICLE_${vehicleId}` }] : []),
         { type: 'MaintenanceHistory', id },
         'Vehicle',
         'Dashboard',
@@ -157,6 +207,8 @@ export const {
   useGetMaintenanceAnalyticsQuery,
   useGetUpcomingMaintenanceQuery,
   useGetMaintenanceRecordsQuery,
+  useGetMyAssignedMaintenanceQuery,
+  useGetVehicleMaintenanceLogsQuery,
   useGetMaintenanceRecordQuery,
   useGetMaintenanceHistoryQuery,
   useGetMaintenanceMetaVehiclesQuery,

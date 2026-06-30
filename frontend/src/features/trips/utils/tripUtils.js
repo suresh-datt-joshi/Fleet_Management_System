@@ -102,3 +102,11 @@ export const consignmentStatusColors = {
   partial: 'warning',
   failed: 'error',
 };
+
+export const consignmentStatusOrder = [
+  'picked_up',
+  'in_transit',
+  'delivered',
+  'partial',
+  'failed',
+];

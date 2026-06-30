@@ -113,6 +113,8 @@ const TrackingPage = () => {
   const breadcrumbPath = selectedTrip?.breadcrumbPath || [];
   const stopMarkers = selectedTrip?.route?.stops || [];
   const geofences = geofenceData?.data?.geofences || [];
+  const companyLocation = dashboard?.companyLocation || null;
+  const hasActiveTrips = activeTrips.length > 0;
 
   const handleRefresh = () => {
     refetch();
@@ -211,6 +213,8 @@ const TrackingPage = () => {
             stopMarkers={stopMarkers}
             selectedVehicleId={selectedVehicleId}
             selectedVehicle={selectedVehicle}
+            companyLocation={companyLocation}
+            hasActiveTrips={hasActiveTrips}
             geofencePlacementMode={geofencePlacementMode}
             onMapClick={handleMapClick}
             height={560}

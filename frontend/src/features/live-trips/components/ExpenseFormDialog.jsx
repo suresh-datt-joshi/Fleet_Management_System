@@ -17,7 +17,7 @@ import {
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { TRIP_EXPENSE_CATEGORIES } from '../../../constants';
 import { expenseCategoryLabels } from '../../trips/utils/tripUtils';
-import { FUEL_TYPES, fuelTypeLabels } from '../../fuel/utils/fuelUtils';
+import { FUEL_TYPES, fuelTypeLabels, estimateTripEndOdometer } from '../../fuel/utils/fuelUtils';
 import { decimalInputProps, moneyInputProps } from '../../../utils/numericInputProps';
 
 const ExpenseFormDialog = ({
@@ -38,6 +38,7 @@ const ExpenseFormDialog = ({
   const [stationId, setStationId] = useState('');
   const [fuelStation, setFuelStation] = useState('');
   const [fuelQuantity, setFuelQuantity] = useState('');
+  const [fuelPricePerUnit, setFuelPricePerUnit] = useState('');
   const [fuelType, setFuelType] = useState(FUEL_TYPES.DIESEL);
   const [odometer, setOdometer] = useState('');
   const [receiptNumber, setReceiptNumber] = useState('');
@@ -46,8 +47,10 @@ const ExpenseFormDialog = ({
   const [notes, setNotes] = useState('');
 
   const isFuel = category === TRIP_EXPENSE_CATEGORIES.FUEL;
-  const pricePerUnit =
-    fuelQuantity && amount ? (Number(amount) / Number(fuelQuantity)).toFixed(2) : '—';
+  const calculatedCost =
+    fuelQuantity && fuelPricePerUnit
+      ? (Number(fuelQuantity) * Number(fuelPricePerUnit)).toFixed(2)
+      : '—';
 
   const resetForm = () => {
     setCategory(defaultCategory || TRIP_EXPENSE_CATEGORIES.FUEL);
@@ -58,8 +61,9 @@ const ExpenseFormDialog = ({
     setStationId('');
     setFuelStation('');
     setFuelQuantity('');
+    setFuelPricePerUnit('');
     setFuelType(trip?.vehicle?.fuelType || FUEL_TYPES.DIESEL);
-    setOdometer(trip?.vehicle?.odometer ?? '');
+    setOdometer(estimateTripEndOdometer(trip));
     setReceiptNumber('');
     setLoggedAt(new Date().toISOString().slice(0, 16));
     setIsFullTank(true);
@@ -77,8 +81,9 @@ const ExpenseFormDialog = ({
     setStationId('');
     setFuelStation('');
     setFuelQuantity('');
+    setFuelPricePerUnit('');
     setFuelType(trip?.vehicle?.fuelType || FUEL_TYPES.DIESEL);
-    setOdometer(trip?.vehicle?.odometer ?? '');
+    setOdometer(estimateTripEndOdometer(trip));
     setReceiptNumber('');
     setLoggedAt(new Date().toISOString().slice(0, 16));
     setIsFullTank(true);
@@ -94,9 +99,10 @@ const ExpenseFormDialog = ({
     e.preventDefault();
 
     if (isFuel) {
+      const cost = Number(fuelQuantity) * Number(fuelPricePerUnit);
       onSubmit({
         category,
-        amount: parseFloat(amount),
+        amount: cost,
         fuelQuantity: parseFloat(fuelQuantity),
         stationId: stationId || undefined,
         fuelStation: stationId ? undefined : fuelStation || undefined,
@@ -123,7 +129,7 @@ const ExpenseFormDialog = ({
   };
 
   const fuelValid =
-    Number(fuelQuantity) > 0 && amount !== '' && Number(amount) >= 0;
+    Number(fuelQuantity) > 0 && fuelPricePerUnit !== '' && Number(fuelPricePerUnit) >= 0;
   const canSubmit = isFuel ? fuelValid : Boolean(amount);
 
   return (
@@ -197,14 +203,14 @@ const ExpenseFormDialog = ({
                       fullWidth
                       required
                       type="number"
-                      label="Cost ($)"
+                      label="Price per Unit ($)"
                       inputProps={moneyInputProps()}
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
+                      value={fuelPricePerUnit}
+                      onChange={(e) => setFuelPricePerUnit(e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={4}>
-                    <TextField fullWidth label="Price per Unit" value={`$${pricePerUnit}`} disabled />
+                    <TextField fullWidth label="Cost ($)" value={calculatedCost === '—' ? '—' : `$${calculatedCost}`} disabled />
                   </Grid>
                   <Grid item xs={6} sm={4}>
                     <TextField

@@ -3,8 +3,8 @@ import MaintenanceHistory from '../models/MaintenanceHistory.js';
 import Vehicle from '../models/Vehicle.js';
 import User from '../models/User.js';
 import Activity from '../models/Activity.js';
-import Alert from '../models/Alert.js';
 import AppError from '../utils/AppError.js';
+import { notifyMaintenanceEvent } from './alertService.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
 import {
@@ -13,22 +13,32 @@ import {
   VEHICLE_STATUS,
   ACTIVITY_TYPES,
   MAINTENANCE_HISTORY_ACTIONS,
-  ALERT_TYPES,
-  ALERT_SEVERITY,
 } from '../constants/enums.js';
+import { uploadFile } from './cloudinaryService.js';
 import { USER_ROLES } from '../constants/roles.js';
 
-const vehiclePopulate = { path: 'vehicle', select: 'vehicleNumber model manufacturer status odometer' };
+const vehiclePopulate = { path: 'vehicle', select: 'vehicleNumber model manufacturer status odometer lastServiceDate' };
 const mechanicPopulate = { path: 'assignedMechanic', select: 'firstName lastName email role' };
+const mechanicsPopulate = { path: 'assignedMechanics', select: 'firstName lastName email role' };
 
 const calculateTotalCost = (laborCost, parts = []) => {
   const partsCost = parts.reduce((sum, p) => sum + (p.cost || 0) * (p.quantity || 1), 0);
   return Math.round((laborCost + partsCost) * 100) / 100;
 };
 
+const formatMechanic = (m) =>
+  m
+    ? {
+        id: m._id || m,
+        name: `${m.firstName} ${m.lastName}`,
+        email: m.email,
+      }
+    : null;
+
 const formatMaintenance = (record) => {
   const r = record.toObject ? record.toObject() : record;
   const partsCost = (r.parts || []).reduce((sum, p) => sum + (p.cost || 0) * (p.quantity || 1), 0);
+  const mechanics = (r.assignedMechanics || []).map(formatMechanic).filter(Boolean);
 
   return {
     id: r._id,
@@ -41,6 +51,7 @@ const formatMaintenance = (record) => {
           manufacturer: r.vehicle.manufacturer,
           status: r.vehicle.status,
           odometer: r.vehicle.odometer,
+          lastServiceDate: r.vehicle.lastServiceDate,
         }
       : null,
     type: r.type,
@@ -51,7 +62,9 @@ const formatMaintenance = (record) => {
     scheduledDate: r.scheduledDate,
     completedDate: r.completedDate,
     odometerAtService: r.odometerAtService,
+    laborHours: r.laborHours ?? 0,
     laborCost: r.laborCost,
+    workPerformed: r.workPerformed || '',
     partsCost: Math.round(partsCost * 100) / 100,
     cost: r.cost,
     parts: (r.parts || []).map((p) => ({
@@ -59,14 +72,17 @@ const formatMaintenance = (record) => {
       name: p.name,
       quantity: p.quantity,
       cost: p.cost,
+      supplier: p.supplier || '',
     })),
-    assignedMechanic: r.assignedMechanic
-      ? {
-          id: r.assignedMechanic._id || r.assignedMechanic,
-          name: `${r.assignedMechanic.firstName} ${r.assignedMechanic.lastName}`,
-          email: r.assignedMechanic.email,
-        }
-      : null,
+    assignedMechanic: formatMechanic(r.assignedMechanic),
+    assignedMechanics: mechanics.length > 0 ? mechanics : r.assignedMechanic ? [formatMechanic(r.assignedMechanic)] : [],
+    attachments: (r.attachments || []).map((a) => ({
+      id: a._id,
+      fileName: a.fileName,
+      fileUrl: a.fileUrl,
+      mimeType: a.mimeType,
+      uploadedAt: a.uploadedAt,
+    })),
     serviceProvider: r.serviceProvider,
     notes: r.notes,
     createdAt: r.createdAt,
@@ -113,14 +129,25 @@ export const syncOverdueRecords = async () => {
   );
 };
 
-const buildFilter = (query) => {
+const buildFilter = (query, user = null) => {
   const filter = { isDeleted: false };
 
   if (query.status) filter.status = query.status;
   if (query.type) filter.type = query.type;
   if (query.priority) filter.priority = query.priority;
   if (query.vehicleId) filter.vehicle = query.vehicleId;
-  if (query.mechanicId) filter.assignedMechanic = query.mechanicId;
+
+  if (query.assignedToMe === 'true' && user) {
+    filter.$or = [
+      { assignedMechanics: user._id },
+      { assignedMechanic: user._id },
+    ];
+  } else if (query.mechanicId) {
+    filter.$or = [
+      { assignedMechanics: query.mechanicId },
+      { assignedMechanic: query.mechanicId },
+    ];
+  }
 
   if (query.from) filter.scheduledDate = { ...filter.scheduledDate, $gte: new Date(query.from) };
   if (query.to) filter.scheduledDate = { ...filter.scheduledDate, $lte: new Date(query.to) };
@@ -132,7 +159,13 @@ const buildFilter = (query) => {
 
   if (query.search) {
     const regex = new RegExp(query.search, 'i');
-    filter.$or = [{ workOrderNumber: regex }, { title: regex }, { description: regex }];
+    const searchOr = [{ workOrderNumber: regex }, { title: regex }, { description: regex }];
+    if (filter.$or) {
+      filter.$and = [{ $or: filter.$or }, { $or: searchOr }];
+      delete filter.$or;
+    } else {
+      filter.$or = searchOr;
+    }
   }
 
   return filter;
@@ -143,7 +176,58 @@ const normalizeParts = (parts = []) =>
     name: p.name,
     quantity: Number(p.quantity ?? 1),
     cost: Number(p.cost ?? 0),
+    supplier: p.supplier || '',
   }));
+
+const resolveMechanicIds = (data) => {
+  if (Array.isArray(data.assignedMechanicIds) && data.assignedMechanicIds.length > 0) {
+    return [...new Set(data.assignedMechanicIds)];
+  }
+  if (data.assignedMechanicId) return [data.assignedMechanicId];
+  return [];
+};
+
+const validateMechanics = async (mechanicIds) => {
+  if (!mechanicIds.length) return [];
+
+  const mechanics = await User.find({
+    _id: { $in: mechanicIds },
+    role: USER_ROLES.MECHANIC,
+    isDeleted: false,
+    isActive: true,
+  }).select('firstName lastName email');
+
+  if (mechanics.length !== mechanicIds.length) {
+    throw new AppError('One or more mechanics not found', 404);
+  }
+
+  return mechanics;
+};
+
+const isManagerRole = (user) =>
+  user && [USER_ROLES.SUPER_ADMIN, USER_ROLES.FLEET_MANAGER].includes(user.role);
+
+const assertMaintenanceActionAccess = (record, user) => {
+  if (!user || isManagerRole(user)) return;
+
+  if (user.role !== USER_ROLES.MECHANIC) return;
+
+  const assignedIds = [
+    ...(record.assignedMechanics || []).map((id) => id.toString()),
+    ...(record.assignedMechanic ? [record.assignedMechanic.toString()] : []),
+  ];
+
+  if (assignedIds.length === 0) {
+    throw new AppError('No mechanic assigned to this work order', 403);
+  }
+
+  if (!assignedIds.includes(user._id.toString())) {
+    throw new AppError('You are not assigned to this work order', 403);
+  }
+};
+
+const populateMaintenance = (query) =>
+  query.populate(vehiclePopulate).populate(mechanicPopulate).populate(mechanicsPopulate);
 
 const setVehicleMaintenanceStatus = async (vehicleId, inMaintenance) => {
   const vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: false });
@@ -169,16 +253,14 @@ const setVehicleMaintenanceStatus = async (vehicleId, inMaintenance) => {
   }
 };
 
-export const getMaintenanceRecords = async (query) => {
+export const getMaintenanceRecords = async (query, user = null) => {
   await syncOverdueRecords();
 
   const { page, limit, skip, sort } = getPagination(query);
-  const filter = buildFilter(query);
+  const filter = buildFilter(query, user);
 
   const [records, total] = await Promise.all([
-    MaintenanceRecord.find(filter)
-      .populate(vehiclePopulate)
-      .populate(mechanicPopulate)
+    populateMaintenance(MaintenanceRecord.find(filter))
       .sort(sort)
       .skip(skip)
       .limit(limit)
@@ -192,16 +274,52 @@ export const getMaintenanceRecords = async (query) => {
   };
 };
 
+export const getMyAssignedMaintenance = async (query, user) => {
+  return getMaintenanceRecords({ ...query, assignedToMe: 'true' }, user);
+};
+
 export const getMaintenanceById = async (id) => {
   await syncOverdueRecords();
 
-  const record = await MaintenanceRecord.findOne({ _id: id, isDeleted: false })
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
-    .lean();
+  const record = await populateMaintenance(
+    MaintenanceRecord.findOne({ _id: id, isDeleted: false })
+  ).lean();
 
   if (!record) throw new AppError('Work order not found', 404);
   return formatMaintenance(record);
+};
+
+export const getVehicleMaintenanceLogs = async (vehicleId, query = {}) => {
+  const vehicle = await Vehicle.findOne({ _id: vehicleId, isDeleted: false });
+  if (!vehicle) throw new AppError('Vehicle not found', 404);
+
+  const { page, limit, skip, sort } = getPagination(query);
+  const filter = {
+    isDeleted: false,
+    vehicle: vehicleId,
+    status: MAINTENANCE_STATUS.COMPLETED,
+  };
+
+  const [records, total] = await Promise.all([
+    populateMaintenance(MaintenanceRecord.find(filter))
+      .sort(sort || { completedDate: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    MaintenanceRecord.countDocuments(filter),
+  ]);
+
+  return {
+    vehicle: {
+      id: vehicle._id,
+      vehicleNumber: vehicle.vehicleNumber,
+      model: vehicle.model,
+      manufacturer: vehicle.manufacturer,
+      lastServiceDate: vehicle.lastServiceDate,
+    },
+    logs: records.map(formatMaintenance),
+    pagination: buildPaginationMeta(total, page, limit),
+  };
 };
 
 export const getMaintenanceStats = async () => {
@@ -253,6 +371,7 @@ export const getUpcomingMaintenance = async (query) => {
   })
     .populate(vehiclePopulate)
     .populate(mechanicPopulate)
+    .populate(mechanicsPopulate)
     .sort({ scheduledDate: 1 })
     .limit(parseInt(query.limit, 10) || 20)
     .lean();
@@ -326,18 +445,9 @@ export const createMaintenance = async (data, userId) => {
   const vehicle = await Vehicle.findOne({ _id: data.vehicleId, isDeleted: false });
   if (!vehicle) throw new AppError('Vehicle not found', 404);
 
-  if (data.assignedMechanicId) {
-    const mechanic = await User.findOne({
-      _id: data.assignedMechanicId,
-      role: USER_ROLES.MECHANIC,
-      isDeleted: false,
-      isActive: true,
-    });
-    if (!mechanic) throw new AppError('Mechanic not found', 404);
-  }
+  const mechanicIds = resolveMechanicIds(data);
+  const mechanics = await validateMechanics(mechanicIds);
 
-  const parts = normalizeParts(data.parts);
-  const laborCost = data.laborCost ?? 0;
   const workOrderNumber = data.workOrderNumber || (await generateWorkOrderNumber());
 
   const record = await MaintenanceRecord.create({
@@ -350,10 +460,8 @@ export const createMaintenance = async (data, userId) => {
     description: data.description || '',
     scheduledDate: new Date(data.scheduledDate),
     odometerAtService: data.odometerAtService ?? vehicle.odometer ?? 0,
-    laborCost,
-    parts,
-    cost: calculateTotalCost(laborCost, parts),
-    assignedMechanic: data.assignedMechanicId || null,
+    assignedMechanic: mechanicIds[0] || null,
+    assignedMechanics: mechanicIds,
     serviceProvider: data.serviceProvider || '',
     notes: data.notes || '',
     createdBy: userId,
@@ -366,6 +474,22 @@ export const createMaintenance = async (data, userId) => {
     `Work order ${record.workOrderNumber} created`,
     userId
   );
+
+  if (mechanics.length > 0) {
+    await logHistory(
+      record._id,
+      MAINTENANCE_HISTORY_ACTIONS.ASSIGNED,
+      `Assigned to ${mechanics.map((m) => `${m.firstName} ${m.lastName}`).join(', ')}`,
+      userId
+    );
+
+    await notifyMaintenanceEvent(record, {
+      title: 'New Maintenance Assignment',
+      message: `You have been assigned to ${record.workOrderNumber} — ${record.title} for ${vehicle.vehicleNumber}`,
+      event: 'assigned',
+    });
+  }
+
   await logActivity(
     ACTIVITY_TYPES.MAINTENANCE_SCHEDULED,
     'Maintenance scheduled',
@@ -374,10 +498,7 @@ export const createMaintenance = async (data, userId) => {
     record._id
   );
 
-  const populated = await MaintenanceRecord.findById(record._id)
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
-    .lean();
+  const populated = await populateMaintenance(MaintenanceRecord.findById(record._id)).lean();
 
   return formatMaintenance(populated);
 };
@@ -396,25 +517,31 @@ export const updateMaintenance = async (id, data, userId) => {
     record.vehicle = data.vehicleId;
   }
 
-  ['type', 'priority', 'title', 'description', 'serviceProvider', 'notes'].forEach((field) => {
+  ['type', 'priority', 'title', 'description', 'serviceProvider', 'notes', 'workPerformed'].forEach((field) => {
     if (data[field] !== undefined) record[field] = data[field];
   });
 
+  const previousScheduledDate = record.scheduledDate ? new Date(record.scheduledDate).getTime() : null;
   if (data.scheduledDate) record.scheduledDate = new Date(data.scheduledDate);
   if (data.odometerAtService !== undefined) record.odometerAtService = data.odometerAtService;
-  if (data.laborCost !== undefined) record.laborCost = data.laborCost;
-  if (data.parts) record.parts = normalizeParts(data.parts);
 
-  record.cost = calculateTotalCost(record.laborCost, record.parts);
+  const scheduleChanged =
+    Boolean(data.scheduledDate) && new Date(data.scheduledDate).getTime() !== previousScheduledDate;
+
   record.updatedBy = userId;
   await record.save();
 
   await logHistory(record._id, MAINTENANCE_HISTORY_ACTIONS.UPDATED, `Work order ${record.workOrderNumber} updated`, userId);
 
-  const populated = await MaintenanceRecord.findById(record._id)
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
-    .lean();
+  if (scheduleChanged) {
+    await notifyMaintenanceEvent(record, {
+      title: 'Maintenance Schedule Updated',
+      message: `${record.workOrderNumber} — ${record.title} has been rescheduled`,
+      event: 'schedule_updated',
+    });
+  }
+
+  const populated = await populateMaintenance(MaintenanceRecord.findById(record._id)).lean();
 
   return formatMaintenance(populated);
 };
@@ -437,40 +564,46 @@ export const deleteMaintenance = async (id, userId) => {
   return { message: 'Work order deleted successfully' };
 };
 
-export const assignMechanic = async (id, mechanicId, userId) => {
+export const assignMechanic = async (id, data, userId) => {
   const record = await MaintenanceRecord.findOne({ _id: id, isDeleted: false });
   if (!record) throw new AppError('Work order not found', 404);
 
-  const mechanic = await User.findOne({
-    _id: mechanicId,
-    role: USER_ROLES.MECHANIC,
-    isDeleted: false,
-    isActive: true,
-  });
-  if (!mechanic) throw new AppError('Mechanic not found', 404);
+  const mechanicIds = data.mechanicIds?.length
+    ? [...new Set(data.mechanicIds)]
+    : data.mechanicId
+      ? [data.mechanicId]
+      : [];
 
-  record.assignedMechanic = mechanicId;
+  const mechanics = await validateMechanics(mechanicIds);
+
+  record.assignedMechanics = mechanicIds;
+  record.assignedMechanic = mechanicIds[0] || null;
   record.updatedBy = userId;
   await record.save();
 
   await logHistory(
     record._id,
     MAINTENANCE_HISTORY_ACTIONS.ASSIGNED,
-    `Assigned to ${mechanic.firstName} ${mechanic.lastName}`,
+    `Assigned to ${mechanics.map((m) => `${m.firstName} ${m.lastName}`).join(', ')}`,
     userId
   );
 
-  const populated = await MaintenanceRecord.findById(record._id)
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
-    .lean();
+  await notifyMaintenanceEvent(record, {
+    title: 'Maintenance Assignment Updated',
+    message: `You have been assigned to ${record.workOrderNumber} — ${record.title}`,
+    event: 'assigned',
+  });
+
+  const populated = await populateMaintenance(MaintenanceRecord.findById(record._id)).lean();
 
   return formatMaintenance(populated);
 };
 
-export const startMaintenance = async (id, userId) => {
+export const startMaintenance = async (id, userId, user = null) => {
   const record = await MaintenanceRecord.findOne({ _id: id, isDeleted: false });
   if (!record) throw new AppError('Work order not found', 404);
+
+  assertMaintenanceActionAccess(record, user);
 
   if (![MAINTENANCE_STATUS.SCHEDULED, MAINTENANCE_STATUS.OVERDUE].includes(record.status)) {
     throw new AppError('Work order cannot be started in its current status', 400);
@@ -491,44 +624,101 @@ export const startMaintenance = async (id, userId) => {
     record._id
   );
 
-  const populated = await MaintenanceRecord.findById(record._id)
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
-    .lean();
+  await notifyMaintenanceEvent(record, {
+    title: 'Maintenance In Progress',
+    message: `Work on ${record.workOrderNumber} — ${record.title} has started`,
+    event: 'started',
+    notifyDriver: true,
+  });
+
+  const populated = await populateMaintenance(MaintenanceRecord.findById(record._id)).lean();
 
   return formatMaintenance(populated);
 };
 
-export const completeMaintenance = async (id, data, userId) => {
+const parseCompletePayload = (data) => {
+  const payload = { ...data };
+
+  if (typeof payload.parts === 'string') {
+    try {
+      payload.parts = JSON.parse(payload.parts);
+    } catch {
+      payload.parts = [];
+    }
+  }
+
+  return payload;
+};
+
+export const completeMaintenance = async (id, data, files, userId, user = null) => {
   const record = await MaintenanceRecord.findOne({ _id: id, isDeleted: false });
   if (!record) throw new AppError('Work order not found', 404);
+
+  assertMaintenanceActionAccess(record, user);
 
   if (record.status !== MAINTENANCE_STATUS.IN_PROGRESS) {
     throw new AppError('Only in-progress work orders can be completed', 400);
   }
 
-  if (data.laborCost !== undefined) record.laborCost = data.laborCost;
-  if (data.parts) record.parts = normalizeParts(data.parts);
-  if (data.odometerAtService !== undefined) record.odometerAtService = data.odometerAtService;
-  if (data.notes !== undefined) record.notes = data.notes;
-  if (data.completedDate) record.completedDate = new Date(data.completedDate);
-  else record.completedDate = new Date();
+  const payload = parseCompletePayload(data);
+
+  if (!payload.workPerformed?.trim()) {
+    throw new AppError('Work performed description is required', 400);
+  }
+
+  if (payload.laborCost !== undefined) record.laborCost = Number(payload.laborCost);
+  if (payload.laborHours !== undefined) record.laborHours = Number(payload.laborHours);
+  if (payload.parts) record.parts = normalizeParts(payload.parts);
+  if (payload.odometerAtService !== undefined) record.odometerAtService = Number(payload.odometerAtService);
+  if (payload.notes !== undefined) record.notes = payload.notes;
+  record.workPerformed = payload.workPerformed.trim();
+  record.completedDate = payload.completedDate ? new Date(payload.completedDate) : new Date();
+
+  if (files?.length) {
+    const uploadedAttachments = await Promise.all(
+      files.map(async (file) => {
+        const uploaded = await uploadFile(file.buffer, file.originalname, file.mimetype, 'maintenance-docs');
+        return {
+          fileName: file.originalname,
+          fileUrl: uploaded.url,
+          mimeType: file.mimetype,
+          publicId: uploaded.publicId,
+          uploadedAt: new Date(),
+          uploadedBy: userId,
+        };
+      })
+    );
+    record.attachments = [...(record.attachments || []), ...uploadedAttachments];
+  }
 
   record.cost = calculateTotalCost(record.laborCost, record.parts);
   record.status = MAINTENANCE_STATUS.COMPLETED;
   record.updatedBy = userId;
   await record.save();
 
-  if (record.odometerAtService) {
-    const vehicle = await Vehicle.findById(record.vehicle);
-    if (vehicle && record.odometerAtService > (vehicle.odometer || 0)) {
+  const vehicle = await Vehicle.findById(record.vehicle);
+  if (vehicle) {
+    if (record.odometerAtService && record.odometerAtService > (vehicle.odometer || 0)) {
       vehicle.odometer = record.odometerAtService;
-      await vehicle.save();
     }
+    vehicle.lastServiceDate = record.completedDate;
+    await vehicle.save();
   }
 
   await setVehicleMaintenanceStatus(record.vehicle, false);
 
+  await logHistory(
+    record._id,
+    MAINTENANCE_HISTORY_ACTIONS.REPORT_SUBMITTED,
+    `Maintenance report submitted — ${record.workPerformed.slice(0, 120)}`,
+    userId,
+    {
+      laborHours: record.laborHours,
+      laborCost: record.laborCost,
+      partsCount: record.parts?.length || 0,
+      attachmentsCount: files?.length || 0,
+    }
+  );
   await logHistory(
     record._id,
     MAINTENANCE_HISTORY_ACTIONS.COMPLETED,
@@ -543,10 +733,14 @@ export const completeMaintenance = async (id, data, userId) => {
     record._id
   );
 
-  const populated = await MaintenanceRecord.findById(record._id)
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
-    .lean();
+  await notifyMaintenanceEvent(record, {
+    title: 'Maintenance Completed',
+    message: `${record.workOrderNumber} — ${record.title} has been completed`,
+    event: 'completed',
+    notifyDriver: true,
+  });
+
+  const populated = await populateMaintenance(MaintenanceRecord.findById(record._id)).lean();
 
   return formatMaintenance(populated);
 };
@@ -618,12 +812,10 @@ export const getMetaMechanics = async () => {
   }));
 };
 
-export const exportMaintenanceCSV = async (query) => {
+export const exportMaintenanceCSV = async (query, user = null) => {
   await syncOverdueRecords();
-  const filter = buildFilter(query);
-  const records = await MaintenanceRecord.find(filter)
-    .populate(vehiclePopulate)
-    .populate(mechanicPopulate)
+  const filter = buildFilter(query, user);
+  const records = await populateMaintenance(MaintenanceRecord.find(filter))
     .sort({ scheduledDate: -1 })
     .limit(5000)
     .lean();
@@ -636,7 +828,15 @@ export const exportMaintenanceCSV = async (query) => {
     { header: 'Status', accessor: 'status' },
     { header: 'Priority', accessor: 'priority' },
     { header: 'Scheduled', accessor: (r) => new Date(r.scheduledDate).toISOString().split('T')[0] },
-    { header: 'Mechanic', accessor: (r) => (r.assignedMechanic ? `${r.assignedMechanic.firstName} ${r.assignedMechanic.lastName}` : '') },
+    {
+      header: 'Mechanics',
+      accessor: (r) => {
+        const names = (r.assignedMechanics || []).map((m) => `${m.firstName} ${m.lastName}`);
+        if (names.length) return names.join('; ');
+        return r.assignedMechanic ? `${r.assignedMechanic.firstName} ${r.assignedMechanic.lastName}` : '';
+      },
+    },
+    { header: 'Labor Hours', accessor: 'laborHours' },
     { header: 'Cost', accessor: 'cost' },
   ];
 
@@ -645,7 +845,9 @@ export const exportMaintenanceCSV = async (query) => {
 
 export default {
   getMaintenanceRecords,
+  getMyAssignedMaintenance,
   getMaintenanceById,
+  getVehicleMaintenanceLogs,
   getMaintenanceStats,
   getUpcomingMaintenance,
   getMaintenanceAnalytics,

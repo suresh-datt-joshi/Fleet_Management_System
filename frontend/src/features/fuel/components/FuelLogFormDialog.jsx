@@ -20,7 +20,7 @@ const defaultValues = {
   driverId: '',
   stationId: '',
   quantity: '',
-  cost: '',
+  pricePerUnit: '',
   odometer: '',
   fuelType: FUEL_TYPES.DIESEL,
   receiptNumber: '',
@@ -35,17 +35,21 @@ const FuelLogFormDialog = ({ open, onClose, onSubmit, initialData, isLoading, ve
   const { control, register, handleSubmit, reset, watch, setValue } = useForm({ defaultValues });
 
   const quantity = watch('quantity');
-  const cost = watch('cost');
+  const pricePerUnit = watch('pricePerUnit');
 
   useEffect(() => {
     if (open) {
       if (initialData) {
+        const qty = initialData.quantity ?? '';
+        const ppu =
+          initialData.pricePerUnit ??
+          (qty && initialData.cost ? Number(initialData.cost) / Number(qty) : '');
         reset({
           vehicleId: initialData.vehicle?.id || '',
           driverId: initialData.driver?.id || '',
           stationId: initialData.station?.id || '',
-          quantity: initialData.quantity ?? '',
-          cost: initialData.cost ?? '',
+          quantity: qty,
+          pricePerUnit: ppu !== '' ? Number(ppu).toFixed(2) : '',
           odometer: initialData.odometer ?? '',
           fuelType: initialData.fuelType || FUEL_TYPES.DIESEL,
           receiptNumber: initialData.receiptNumber || '',
@@ -71,19 +75,25 @@ const FuelLogFormDialog = ({ open, onClose, onSubmit, initialData, isLoading, ve
   };
 
   const submit = (data) => {
+    const qty = Number(data.quantity);
+    const ppu = Number(data.pricePerUnit);
     onSubmit({
       ...data,
       vehicleId: data.vehicleId,
       driverId: data.driverId || null,
       stationId: data.stationId || null,
-      quantity: Number(data.quantity),
-      cost: Number(data.cost),
+      quantity: qty,
+      cost: Math.round(qty * ppu * 100) / 100,
+      pricePerUnit: ppu,
       odometer: Number(data.odometer || 0),
       loggedAt: data.loggedAt ? new Date(data.loggedAt).toISOString() : undefined,
     });
   };
 
-  const pricePerUnit = quantity && cost ? (Number(cost) / Number(quantity)).toFixed(2) : '—';
+  const calculatedCost =
+    quantity && pricePerUnit
+      ? (Number(quantity) * Number(pricePerUnit)).toFixed(2)
+      : '—';
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -147,13 +157,18 @@ const FuelLogFormDialog = ({ open, onClose, onSubmit, initialData, isLoading, ve
               <TextField
                 fullWidth
                 type="number"
-                label="Cost ($)"
+                label="Price per Unit ($)"
                 inputProps={moneyInputProps()}
-                {...register('cost', { required: true, min: 0 })}
+                {...register('pricePerUnit', { required: true, min: 0 })}
               />
             </Grid>
             <Grid item xs={12}>
-              <TextField fullWidth label="Price per Unit" value={`$${pricePerUnit}`} disabled />
+              <TextField
+                fullWidth
+                label="Cost ($)"
+                value={calculatedCost === '—' ? '—' : `$${calculatedCost}`}
+                disabled
+              />
             </Grid>
             <Grid item xs={6}>
               <Controller
@@ -176,7 +191,8 @@ const FuelLogFormDialog = ({ open, onClose, onSubmit, initialData, isLoading, ve
                 type="number"
                 label="Odometer (km)"
                 inputProps={decimalInputProps()}
-                {...register('odometer')}
+                helperText="Required for mileage — uses vehicle odometer if left blank"
+                {...register('odometer', { min: 0 })}
               />
             </Grid>
             <Grid item xs={12}>

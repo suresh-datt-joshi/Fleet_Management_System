@@ -322,8 +322,8 @@ const TripsPage = () => {
       },
       {
         field: 'estimatedCost',
-        headerName: 'Est. Cost',
-        width: 100,
+        headerName: 'Est. Trip Cost',
+        width: 120,
         valueFormatter: (value) => formatCurrency(value),
       },
       {
@@ -430,8 +430,8 @@ const TripsPage = () => {
       },
       {
         field: 'estimatedCost',
-        headerName: 'Cost',
-        width: 86,
+        headerName: 'Est. Trip Cost',
+        width: 100,
         align: 'right',
         headerAlign: 'right',
         valueFormatter: (value) => formatCurrency(value),

@@ -5,11 +5,16 @@ import { baseApi } from '../redux/api/baseApi';
 import { SOCKET_EVENTS } from '../constants/socketEvents';
 import { connectSocket, disconnectSocket, onSocketEvent } from '../services/socketManager';
 import { useAuth } from './useAuth';
+import { USER_ROLES } from '../constants';
+
+const isPersonalizedNotificationRole = (role) =>
+  role === USER_ROLES.DRIVER || role === USER_ROLES.MECHANIC;
 
 export const useRealtimeSync = () => {
   const dispatch = useDispatch();
   const { enqueueSnackbar } = useSnackbar();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const showFleetAlertToasts = !isPersonalizedNotificationRole(user?.role);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -26,7 +31,9 @@ export const useRealtimeSync = () => {
     const unsubscribers = [
       onSocketEvent(SOCKET_EVENTS.ALERT_CREATED, (alert) => {
         invalidate(['Alert', 'Notification', 'Dashboard']);
-        enqueueSnackbar(alert.title, { variant: alert.severity === 'high' ? 'error' : 'warning' });
+        if (showFleetAlertToasts) {
+          enqueueSnackbar(alert.title, { variant: alert.severity === 'high' ? 'error' : 'warning' });
+        }
       }),
       onSocketEvent(SOCKET_EVENTS.ALERT_UPDATED, () => {
         invalidate(['Alert', 'Notification', 'Dashboard']);
@@ -73,9 +80,11 @@ export const useRealtimeSync = () => {
       }),
       onSocketEvent(SOCKET_EVENTS.GPS_ALERT, (alert) => {
         invalidate(['Alert', 'Notification', 'Dashboard', 'Tracking']);
-        enqueueSnackbar(`${alert.title}: ${alert.message}`, {
-          variant: alert.severity === 'high' ? 'error' : 'warning',
-        });
+        if (showFleetAlertToasts) {
+          enqueueSnackbar(`${alert.title}: ${alert.message}`, {
+            variant: alert.severity === 'high' ? 'error' : 'warning',
+          });
+        }
       }),
     ];
 
@@ -83,7 +92,7 @@ export const useRealtimeSync = () => {
       unsubscribers.forEach((unsub) => unsub());
       disconnectSocket();
     };
-  }, [dispatch, enqueueSnackbar, isAuthenticated]);
+  }, [dispatch, enqueueSnackbar, isAuthenticated, showFleetAlertToasts]);
 };
 
 export default useRealtimeSync;

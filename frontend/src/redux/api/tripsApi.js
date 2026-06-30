@@ -61,6 +61,27 @@ export const resolveReceiptUrl = (url) => {
   return `${base}${url}`;
 };
 
+const patchTripConsignmentInCache = (dispatch, tripId, consignment) => {
+  const id = String(tripId);
+
+  dispatch(
+    baseApi.util.updateQueryData('getMyActiveTrip', undefined, (draft) => {
+      const trip = draft?.data?.trip;
+      if (trip && String(trip.id) === id) {
+        trip.consignment = { ...trip.consignment, ...consignment };
+      }
+    })
+  );
+
+  dispatch(
+    baseApi.util.updateQueryData('getTrip', id, (draft) => {
+      if (draft?.data?.trip) {
+        draft.data.trip.consignment = { ...draft.data.trip.consignment, ...consignment };
+      }
+    })
+  );
+};
+
 export const tripsApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     getTripStats: builder.query({
@@ -262,9 +283,28 @@ export const tripsApi = baseApi.injectEndpoints({
         method: 'PATCH',
         body,
       }),
+      async onQueryStarted({ tripId, ...body }, { dispatch, queryFulfilled }) {
+        const id = String(tripId);
+        const optimistic = {
+          ...body,
+          updatedAt: new Date().toISOString(),
+        };
+        patchTripConsignmentInCache(dispatch, id, optimistic);
+
+        try {
+          const { data: result } = await queryFulfilled;
+          const consignment = result?.data?.consignment;
+          if (consignment) {
+            patchTripConsignmentInCache(dispatch, id, consignment);
+          }
+        } catch {
+          dispatch(baseApi.util.invalidateTags([{ type: 'Trip', id: 'MY_ACTIVE' }, { type: 'Trip', id: id }]));
+        }
+      },
       invalidatesTags: (result, error, { tripId }) => [
         { type: 'Trip', id: tripId },
         { type: 'Trip', id: 'MY_ACTIVE' },
+        { type: 'Trip', id: 'LIST' },
         { type: 'TripHistory', id: tripId },
       ],
     }),

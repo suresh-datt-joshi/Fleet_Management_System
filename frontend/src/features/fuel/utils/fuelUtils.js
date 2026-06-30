@@ -30,4 +30,13 @@ export const formatCurrency = (value) =>
 export const formatQuantity = (liters) => `${Number(liters || 0).toFixed(1)} L`;
 
 export const formatMileage = (kmPerLiter) =>
-  kmPerLiter ? `${Number(kmPerLiter).toFixed(2)} km/L` : '—';
+  kmPerLiter > 0 ? `${Number(kmPerLiter).toFixed(2)} km/L` : '—';
+
+export const estimateTripEndOdometer = (trip) => {
+  const start = Number(trip?.vehicle?.odometer || 0);
+  const distance = Number(trip?.distance || 0);
+  if (start > 0 && distance > 0) {
+    return Math.round((start + distance) * 100) / 100;
+  }
+  return start || '';
+};

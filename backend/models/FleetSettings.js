@@ -14,6 +14,12 @@ const fleetSettingsSchema = new mongoose.Schema(
     companyEmail: { type: String, default: '', trim: true, lowercase: true },
     companyPhone: { type: String, default: '', trim: true },
     companyAddress: { type: String, default: '', trim: true, maxlength: 500 },
+    companyLocation: {
+      address: { type: String, default: '', trim: true, maxlength: 500 },
+      lat: { type: Number, default: null },
+      lng: { type: Number, default: null },
+      placeId: { type: String, default: '', trim: true },
+    },
     timezone: { type: String, default: 'UTC', trim: true },
     currency: { type: String, default: 'USD', trim: true, uppercase: true },
     dateFormat: { type: String, default: 'YYYY-MM-DD', trim: true },

@@ -7,6 +7,7 @@ import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
 import { uploadImage, deleteImage } from '../services/cloudinaryService.js';
 import { VEHICLE_STATUS, VEHICLE_HISTORY_ACTIONS, ACTIVITY_TYPES } from '../constants/enums.js';
+import { notifyDriverEvent } from './alertService.js';
 
 const populateOptions = {
   path: 'assignedDriver',
@@ -225,6 +226,14 @@ export const assignDriver = async (vehicleId, driverId, userId) => {
     userId,
     vehicle._id
   );
+
+  await notifyDriverEvent(driverId, {
+    title: 'Vehicle Assigned',
+    message: `You have been assigned to vehicle ${vehicle.vehicleNumber}`,
+    entityType: 'vehicle',
+    entityId: vehicle._id,
+    metadata: { vehicleNumber: vehicle.vehicleNumber, event: 'vehicle_assigned' },
+  });
 
   return Vehicle.findById(vehicle._id).populate(populateOptions).lean();
 };

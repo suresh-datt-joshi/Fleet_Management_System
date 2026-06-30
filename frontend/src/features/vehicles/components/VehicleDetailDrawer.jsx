@@ -17,10 +17,14 @@ import CloseIcon from '@mui/icons-material/Close';
 import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import BuildIcon from '@mui/icons-material/Build';
 import { useRef } from 'react';
+import { format } from 'date-fns';
 import { statusColors, fuelTypeLabels } from '../utils/vehicleUtils';
 import { formatRelativeTime } from '../../../utils/formatters';
 import { useGetVehicleHistoryQuery } from '../../../redux/api/vehiclesApi';
+import { useGetVehicleMaintenanceLogsQuery } from '../../../redux/api/maintenanceApi';
+import { formatCurrency, getMechanicNames, typeLabels } from '../../maintenance/utils/maintenanceUtils';
 import { API_BASE_URL } from '../../../constants';
 
 const DetailItem = ({ label, value }) => (
@@ -53,9 +57,11 @@ const VehicleDetailDrawer = ({
   onDelete,
   onUploadImage,
   onDeleteImage,
+  onScheduleMaintenance,
   canUpdate,
   canDelete,
   canAssign,
+  canScheduleMaintenance,
   isUploading,
 }) => {
   const fileInputRef = useRef(null);
@@ -63,10 +69,15 @@ const VehicleDetailDrawer = ({
     { id: vehicle?._id, limit: 10 },
     { skip: !vehicle?._id || !open }
   );
+  const { data: maintenanceLogsData, isLoading: maintenanceLogsLoading } = useGetVehicleMaintenanceLogsQuery(
+    { vehicleId: vehicle?._id, limit: 5 },
+    { skip: !vehicle?._id || !open }
+  );
 
   if (!vehicle) return null;
 
   const history = historyData?.data?.history || [];
+  const maintenanceLogs = maintenanceLogsData?.data?.logs || [];
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -107,6 +118,7 @@ const VehicleDetailDrawer = ({
           <DetailItem label="VIN" value={vehicle.vin} />
           <DetailItem label="RC Number" value={vehicle.registrationNumber} />
           <DetailItem label="Odometer" value={`${vehicle.odometer?.toLocaleString()} km`} />
+          <DetailItem label="Last Service" value={vehicle.lastServiceDate ? format(new Date(vehicle.lastServiceDate), 'MMM d, yyyy') : '—'} />
           <DetailItem label="Fuel Level" value={`${vehicle.fuelLevel}%`} />
         </Grid>
 
@@ -195,6 +207,50 @@ const VehicleDetailDrawer = ({
               ))}
             </Box>
           </>
+        )}
+
+        <Divider sx={{ my: 2 }} />
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={1}>
+          <Typography variant="subtitle2" fontWeight={600}>
+            Maintenance History
+          </Typography>
+          {canScheduleMaintenance && (
+            <Button size="small" variant="outlined" startIcon={<BuildIcon />} onClick={onScheduleMaintenance}>
+              Schedule
+            </Button>
+          )}
+        </Box>
+        {maintenanceLogsLoading ? (
+          <CircularProgress size={24} />
+        ) : maintenanceLogs.length === 0 ? (
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            No completed maintenance records yet
+          </Typography>
+        ) : (
+          <List dense disablePadding sx={{ mb: 2 }}>
+            {maintenanceLogs.map((log) => (
+              <ListItem key={log.id} sx={{ px: 0, alignItems: 'flex-start' }}>
+                <ListItemText
+                  primary={`${log.workOrderNumber} — ${log.title}`}
+                  secondary={
+                    <>
+                      {typeLabels[log.type] || log.type} · {getMechanicNames(log)} · {formatCurrency(log.cost)}
+                      {log.completedDate && ` · ${format(new Date(log.completedDate), 'MMM d, yyyy')}`}
+                      {log.workPerformed && (
+                        <>
+                          <br />
+                          {log.workPerformed.slice(0, 120)}
+                          {log.workPerformed.length > 120 ? '…' : ''}
+                        </>
+                      )}
+                    </>
+                  }
+                  primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }}
+                  secondaryTypographyProps={{ variant: 'caption' }}
+                />
+              </ListItem>
+            ))}
+          </List>
         )}
 
         {vehicle.notes && (

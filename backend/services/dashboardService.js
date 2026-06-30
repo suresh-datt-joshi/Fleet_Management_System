@@ -4,6 +4,8 @@ import Trip from '../models/Trip.js';
 import FuelLog from '../models/FuelLog.js';
 import MaintenanceRecord from '../models/MaintenanceRecord.js';
 import Alert from '../models/Alert.js';
+import Notification from '../models/Notification.js';
+import { isRestrictedAlertRole } from '../utils/notificationTargeting.js';
 import Activity from '../models/Activity.js';
 import {
   VEHICLE_STATUS,
@@ -305,7 +307,26 @@ export const getRecentActivities = async (limit = 10) => {
   }));
 };
 
-export const getDashboardAlerts = async (limit = 8) => {
+export const getDashboardAlerts = async (limit = 8, user = null) => {
+  if (user && isRestrictedAlertRole(user.role)) {
+    const notifications = await Notification.find({ user: user._id })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return notifications.map((n) => ({
+      id: n._id,
+      type: n.metadata?.alertType || n.type,
+      severity: n.metadata?.severity || 'medium',
+      title: n.title,
+      message: n.message,
+      isRead: n.isRead,
+      vehicle: n.metadata?.vehicleNumber ? { number: n.metadata.vehicleNumber } : null,
+      driver: null,
+      createdAt: n.createdAt,
+    }));
+  }
+
   const alerts = await Alert.find()
     .sort({ createdAt: -1 })
     .limit(limit)

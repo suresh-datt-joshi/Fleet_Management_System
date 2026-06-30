@@ -1,11 +1,13 @@
 import Trip from '../models/Trip.js';
 import TripHistory from '../models/TripHistory.js';
 import TripExpense from '../models/TripExpense.js';
+import FuelLog from '../models/FuelLog.js';
 import Driver from '../models/Driver.js';
 import Vehicle from '../models/Vehicle.js';
 import Route from '../models/Route.js';
 import Activity from '../models/Activity.js';
 import * as socketService from './socketService.js';
+import { notifyTripEvent } from './alertService.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
@@ -17,6 +19,7 @@ import {
   ACTIVITY_TYPES,
   TRIP_HISTORY_ACTIONS,
   TRIP_EXPENSE_CATEGORIES,
+  CONSIGNMENT_STATUS,
 } from '../constants/enums.js';
 import {
   applyDriverTripScope,
@@ -59,6 +62,42 @@ const buildExpenseBreakdownFromRecords = (expenses) => {
     lodging: sumByCategory(TRIP_EXPENSE_CATEGORIES.LODGING),
     other: sumByCategory(TRIP_EXPENSE_CATEGORIES.OTHER),
   };
+};
+
+const deriveTripDistanceIfMissing = async (trip) => {
+  if (trip.distance > 0) return trip.distance;
+
+  if (trip.route) {
+    const route = await Route.findById(trip.route).select('totalDistanceMeters').lean();
+    if (route?.totalDistanceMeters > 0) {
+      trip.distance = Math.round((route.totalDistanceMeters / 1000) * 100) / 100;
+      return trip.distance;
+    }
+  }
+
+  if (trip.startOdometer > 0) {
+    const vehicle = await Vehicle.findById(trip.vehicle).select('odometer').lean();
+    if (vehicle?.odometer > trip.startOdometer) {
+      trip.distance = Math.round((vehicle.odometer - trip.startOdometer) * 100) / 100;
+      return trip.distance;
+    }
+
+    const maxFuelLog = await FuelLog.findOne({
+      trip: trip._id,
+      isDeleted: false,
+      odometer: { $gt: 0 },
+    })
+      .sort({ odometer: -1 })
+      .select('odometer')
+      .lean();
+
+    if (maxFuelLog?.odometer > trip.startOdometer) {
+      trip.distance = Math.round((maxFuelLog.odometer - trip.startOdometer) * 100) / 100;
+      return trip.distance;
+    }
+  }
+
+  return trip.distance || 0;
 };
 
 const formatLocation = (loc) =>
@@ -187,6 +226,26 @@ const generateTripNumber = async () => {
   return `${prefix}-${String(count + 1).padStart(4, '0')}`;
 };
 
+const buildConsignmentReference = (tripNumber) => `CSG-${tripNumber.replace(/^TRP-/, '')}`;
+
+const initializeConsignmentOnStart = (trip) => {
+  const referenceNumber = trip.consignment?.referenceNumber?.trim()
+    ? trip.consignment.referenceNumber
+    : buildConsignmentReference(trip.tripNumber);
+  const status =
+    trip.consignment?.status && trip.consignment.status !== CONSIGNMENT_STATUS.PENDING
+      ? trip.consignment.status
+      : CONSIGNMENT_STATUS.IN_TRANSIT;
+
+  trip.set('consignment', {
+    referenceNumber,
+    description: trip.consignment?.description || '',
+    status,
+    notes: trip.consignment?.notes || '',
+    updatedAt: new Date(),
+  });
+};
+
 const buildFilter = (query) => {
   const filter = { isDeleted: false };
 
@@ -310,19 +369,47 @@ export const getMyDriverProfile = async (userId) => {
   if (!driverId) return null;
 
   const driver = await Driver.findOne({ _id: driverId, isDeleted: false })
-    .select('firstName lastName email phone status licenseNumber assignedVehicle')
+    .select(
+      'firstName lastName email phone status licenseNumber licenseExpiry medicalCertificateExpiry documents assignedVehicle employeeId'
+    )
+    .populate(
+      'assignedVehicle',
+      'vehicleNumber model manufacturer status fuelLevel odometer documentExpiry currentLocation'
+    )
     .lean();
 
   if (!driver) return null;
 
   return {
     id: driver._id,
+    employeeId: driver.employeeId,
     name: `${driver.firstName} ${driver.lastName}`,
     email: driver.email,
     phone: driver.phone,
     status: driver.status,
     licenseNumber: driver.licenseNumber,
-    assignedVehicleId: driver.assignedVehicle,
+    licenseExpiry: driver.licenseExpiry,
+    medicalCertificateExpiry: driver.medicalCertificateExpiry,
+    documents: (driver.documents || []).map((doc) => ({
+      type: doc.type,
+      name: doc.name,
+      expiryDate: doc.expiryDate,
+    })),
+    assignedVehicleId: driver.assignedVehicle?._id || driver.assignedVehicle || null,
+    assignedVehicle: driver.assignedVehicle
+      ? {
+          id: driver.assignedVehicle._id,
+          vehicleNumber: driver.assignedVehicle.vehicleNumber,
+          model: driver.assignedVehicle.model,
+          manufacturer: driver.assignedVehicle.manufacturer,
+          status: driver.assignedVehicle.status,
+          fuelLevel: driver.assignedVehicle.fuelLevel,
+          odometer: driver.assignedVehicle.odometer,
+          insuranceExpiry: driver.assignedVehicle.documentExpiry?.insurance || null,
+          registrationExpiry: driver.assignedVehicle.documentExpiry?.registration || null,
+          location: driver.assignedVehicle.currentLocation?.address || '',
+        }
+      : null,
   };
 };
 
@@ -559,12 +646,23 @@ export const createTrip = async (data, userId) => {
 
   const formatted = formatTrip(populated);
   socketService.emitTripUpdated(formatted);
+
+  await notifyTripEvent(trip, {
+    title: 'New Trip Assignment',
+    message: `Trip ${trip.tripNumber} scheduled for ${vehicle.vehicleNumber}`,
+    event: 'assigned',
+  });
+
   return formatted;
 };
 
 export const updateTrip = async (id, data, userId) => {
   const trip = await Trip.findOne({ _id: id, isDeleted: false });
   if (!trip) throw new AppError('Trip not found', 404);
+
+  const originalDriverId = trip.driver.toString();
+  const originalVehicleId = trip.vehicle.toString();
+  const originalScheduledAt = trip.scheduledAt ? new Date(trip.scheduledAt).getTime() : null;
 
   if (
     [
@@ -636,6 +734,29 @@ export const updateTrip = async (id, data, userId) => {
 
   const formatted = formatTrip(populated);
   socketService.emitTripUpdated(formatted);
+
+  const scheduleChanged =
+    data.scheduledAt && new Date(data.scheduledAt).getTime() !== originalScheduledAt;
+  const driverChanged = data.driverId && data.driverId !== originalDriverId;
+  const vehicleChanged = data.vehicleId && data.vehicleId !== originalVehicleId;
+  const routeChanged = Boolean(data.origin || data.destination || data.routeId !== undefined);
+
+  if (scheduleChanged || driverChanged || vehicleChanged || routeChanged) {
+    await notifyTripEvent(trip, {
+      title: 'Trip Updated',
+      message: `Trip ${trip.tripNumber} details have been updated`,
+      event: 'updated',
+    });
+  }
+
+  if (driverChanged) {
+    await notifyTripEvent({ ...trip.toObject(), driver: data.driverId }, {
+      title: 'New Trip Assignment',
+      message: `You have been assigned to trip ${trip.tripNumber}`,
+      event: 'assigned',
+    });
+  }
+
   return formatted;
 };
 
@@ -677,6 +798,7 @@ export const startTrip = async (id, userId, user = null) => {
 
   const vehicle = await Vehicle.findById(trip.vehicle);
   if (vehicle) {
+    trip.startOdometer = vehicle.odometer || 0;
     vehicle.ignition = true;
     if (driver) {
       vehicle.assignedDriver = driver._id;
@@ -687,9 +809,17 @@ export const startTrip = async (id, userId, user = null) => {
   trip.status = TRIP_STATUS.IN_PROGRESS;
   trip.startedAt = new Date();
   trip.updatedBy = userId;
+  initializeConsignmentOnStart(trip);
   await trip.save();
 
   await logHistory(trip._id, TRIP_HISTORY_ACTIONS.STARTED, `Trip ${trip.tripNumber} started`, userId);
+  await logHistory(
+    trip._id,
+    TRIP_HISTORY_ACTIONS.CONSIGNMENT_UPDATED,
+    `Consignment reference ${trip.consignment.referenceNumber} assigned`,
+    userId,
+    { referenceNumber: trip.consignment.referenceNumber, status: trip.consignment.status }
+  );
   await logActivity(
     ACTIVITY_TYPES.TRIP_STARTED,
     'Trip started',
@@ -706,6 +836,13 @@ export const startTrip = async (id, userId, user = null) => {
 
   const formatted = formatTrip(populated);
   socketService.emitTripStarted(formatted);
+
+  await notifyTripEvent(trip, {
+    title: 'Trip Started',
+    message: `Trip ${trip.tripNumber} is now in progress`,
+    event: 'started',
+  });
+
   return formatted;
 };
 
@@ -724,6 +861,8 @@ export const completeTrip = async (id, data, userId, user = null) => {
   if (data.expenses !== undefined) trip.expenses = data.expenses;
   if (data.notes !== undefined) trip.notes = data.notes;
 
+  await deriveTripDistanceIfMissing(trip);
+
   await tripExpenseService.recalculateTripTotals(id);
   const refreshed = await Trip.findById(id);
   if (refreshed) {
@@ -736,6 +875,8 @@ export const completeTrip = async (id, data, userId, user = null) => {
 
   if (Array.isArray(data.fuelLogs) && data.fuelLogs.length > 0) {
     await fuelService.createFuelLogsForTripCompletion(trip, data.fuelLogs, userId);
+  } else {
+    await fuelService.finalizeTripFuelLogOdometers(trip, userId);
   }
 
   const now = data.completedAt ? new Date(data.completedAt) : new Date();
@@ -788,6 +929,13 @@ export const completeTrip = async (id, data, userId, user = null) => {
 
   const formatted = formatTrip(populated);
   socketService.emitTripSubmitted(formatted);
+
+  await notifyTripEvent(trip, {
+    title: 'Trip Submitted for Review',
+    message: `Trip ${trip.tripNumber} has been submitted and is pending review`,
+    event: 'submitted',
+  });
+
   return formatted;
 };
 
@@ -908,6 +1056,13 @@ export const cancelTrip = async (id, data, userId, user = null) => {
 
   const formatted = formatTrip(populated);
   socketService.emitTripCancelled(formatted);
+
+  await notifyTripEvent(trip, {
+    title: 'Trip Cancelled',
+    message: `Trip ${trip.tripNumber} has been cancelled`,
+    event: 'cancelled',
+  });
+
   return formatted;
 };
 

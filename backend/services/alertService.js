@@ -20,6 +20,13 @@ import {
 } from '../constants/enums.js';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../constants/roles.js';
 import * as socketService from './socketService.js';
+import {
+  resolveAlertRecipients,
+  isRestrictedAlertRole,
+  getAlertIdsForUser,
+  getMechanicIdsFromRecord,
+} from '../utils/notificationTargeting.js';
+import { getUserIdForDriver } from '../utils/driverUserLink.js';
 
 const vehiclePopulate = { path: 'vehicle', select: 'vehicleNumber model manufacturer status fuelLevel' };
 const driverPopulate = { path: 'driver', select: 'firstName lastName email phone' };
@@ -106,15 +113,121 @@ const logActivity = async (title, description, userId, entityId) => {
   });
 };
 
-export const fanOutNotification = async (alert, notificationType = NOTIFICATION_TYPES.ALERT) => {
-  const users = await User.find({
-    isDeleted: false,
-    isActive: true,
-  }).lean();
+export const notifyUsers = async ({
+  userIds,
+  type = NOTIFICATION_TYPES.SYSTEM,
+  title,
+  message,
+  entityType = null,
+  entityId = null,
+  metadata = {},
+  alertId = null,
+}) => {
+  const uniqueIds = [...new Set((userIds || []).filter(Boolean).map((id) => id.toString()))];
+  if (uniqueIds.length === 0) return [];
 
-  const eligible = users
-    .filter((user) => (ROLE_PERMISSIONS[user.role] || []).includes(PERMISSIONS.VIEW_ALERTS))
-    .map((user) => user._id);
+  const fiveMinAgo = new Date(Date.now() - DEDUP_WINDOW_MS);
+  const dedupFilter = {
+    user: { $in: uniqueIds },
+    title,
+    createdAt: { $gte: fiveMinAgo },
+  };
+  if (entityId) dedupFilter.entityId = entityId;
+
+  const recentDuplicate = await Notification.findOne(dedupFilter);
+  if (recentDuplicate) return [];
+
+  const created = await Notification.insertMany(
+    uniqueIds.map((userId) => ({
+      user: userId,
+      type,
+      title,
+      message,
+      alert: alertId,
+      entityType,
+      entityId,
+      metadata,
+    }))
+  );
+
+  for (const notification of created) {
+    socketService.emitNotificationNew(notification.user, formatNotification(notification));
+  }
+
+  return created;
+};
+
+export const notifyMaintenanceEvent = async (record, { title, message, event, notifyDriver = false }) => {
+  const vehicle = await Vehicle.findById(record.vehicle).select('vehicleNumber assignedDriver').lean();
+  const userIds = getMechanicIdsFromRecord(record);
+
+  if (notifyDriver && vehicle?.assignedDriver) {
+    const driverUserId = await getUserIdForDriver(vehicle.assignedDriver);
+    if (driverUserId) userIds.push(driverUserId);
+  }
+
+  return notifyUsers({
+    userIds,
+    type: NOTIFICATION_TYPES.MAINTENANCE,
+    title,
+    message,
+    entityType: 'maintenance',
+    entityId: record._id,
+    metadata: {
+      event,
+      workOrderNumber: record.workOrderNumber,
+      vehicleNumber: vehicle?.vehicleNumber,
+      status: record.status,
+    },
+  });
+};
+
+export const notifyTripEvent = async (trip, { title, message, event }) => {
+  const driverUserId = await getUserIdForDriver(trip.driver);
+  const vehicle = await Vehicle.findById(trip.vehicle).select('vehicleNumber').lean();
+
+  return notifyUsers({
+    userIds: driverUserId ? [driverUserId] : [],
+    type: NOTIFICATION_TYPES.TRIP,
+    title,
+    message,
+    entityType: 'trip',
+    entityId: trip._id,
+    metadata: {
+      event,
+      tripNumber: trip.tripNumber,
+      vehicleNumber: vehicle?.vehicleNumber,
+      status: trip.status,
+    },
+  });
+};
+
+export const notifyDriverEvent = async (driverId, { title, message, entityType, entityId, metadata = {} }) => {
+  const driverUserId = await getUserIdForDriver(driverId);
+  return notifyUsers({
+    userIds: driverUserId ? [driverUserId] : [],
+    type: NOTIFICATION_TYPES.SYSTEM,
+    title,
+    message,
+    entityType,
+    entityId,
+    metadata,
+  });
+};
+
+export const fanOutNotification = async (alert, notificationType = NOTIFICATION_TYPES.ALERT, explicitRecipients = null) => {
+  let eligible;
+  if (explicitRecipients?.length) {
+    eligible = explicitRecipients;
+  } else {
+    const recipientIds = await resolveAlertRecipients({
+      type: alert.type,
+      vehicle: alert.vehicle,
+      driver: alert.driver,
+      metadata: alert.metadata,
+    });
+    eligible = recipientIds;
+  }
 
   if (eligible.length === 0) return;
 
@@ -132,9 +245,9 @@ export const fanOutNotification = async (alert, notificationType = NOTIFICATION_
       title: alert.title,
       message: alert.message,
       alert: alert._id,
-      entityType: 'alert',
-      entityId: alert._id,
-      metadata: { alertType: alert.type, severity: alert.severity },
+      entityType: alert.metadata?.entityType || 'alert',
+      entityId: alert.metadata?.entityId || alert._id,
+      metadata: { alertType: alert.type, severity: alert.severity, ...(alert.metadata || {}) },
     }))
   );
 
@@ -183,9 +296,14 @@ const createAlertRecord = async (data, userId = null, fanOut = true) => {
   return formatted;
 };
 
-export const getAlerts = async (query) => {
+export const getAlerts = async (query, user = null) => {
   const { page, limit, skip, sort } = getPagination(query);
   const filter = buildFilter(query);
+
+  if (user && isRestrictedAlertRole(user.role)) {
+    const alertIds = await getAlertIdsForUser(user._id);
+    filter._id = { $in: alertIds.length > 0 ? alertIds : [null] };
+  }
 
   const [alerts, total] = await Promise.all([
     Alert.find(filter).populate(vehiclePopulate).populate(driverPopulate).sort(sort).skip(skip).limit(limit).lean(),
@@ -204,7 +322,19 @@ export const getAlertById = async (id) => {
   return formatAlert(alert);
 };
 
-export const getAlertStats = async () => {
+export const getAlertStats = async (user = null) => {
+  if (user && isRestrictedAlertRole(user.role)) {
+    const stats = await getNotificationStats(user._id);
+    return {
+      total: stats.total,
+      unread: stats.unread,
+      critical: 0,
+      high: 0,
+      byType: stats.byType,
+      scopedToUser: true,
+    };
+  }
+
   const [total, unread, critical, high, byType] = await Promise.all([
     Alert.countDocuments(),
     Alert.countDocuments({ isRead: false }),
@@ -294,7 +424,11 @@ export const markAlertAsRead = async (id) => {
   return formatted;
 };
 
-export const markAllAlertsAsRead = async () => {
+export const markAllAlertsAsRead = async (user = null) => {
+  if (user && isRestrictedAlertRole(user.role)) {
+    return markAllNotificationsAsRead(user._id);
+  }
+
   const result = await Alert.updateMany({ isRead: false }, { isRead: true });
   await Notification.updateMany({ isRead: false }, { isRead: true, readAt: new Date() });
   socketService.emitAlertsAllRead({ modifiedCount: result.modifiedCount });
@@ -540,6 +674,11 @@ export const getMetaDrivers = async () => {
 };
 
 export default {
+  notifyUsers,
+  notifyMaintenanceEvent,
+  notifyTripEvent,
+  notifyDriverEvent,
+  fanOutNotification,
   getAlerts,
   getAlertById,
   getAlertStats,

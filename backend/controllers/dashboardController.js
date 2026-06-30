@@ -19,7 +19,7 @@ export const getActivities = catchAsync(async (req, res) => {
 
 export const getAlerts = catchAsync(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 8, 50);
-  const alerts = await dashboardService.getDashboardAlerts(limit);
+  const alerts = await dashboardService.getDashboardAlerts(limit, req.user);
   res.status(200).json({ success: true, data: alerts });
 });
 
@@ -33,7 +33,7 @@ export const getOverview = catchAsync(async (req, res) => {
     dashboardService.getDashboardSummary(),
     dashboardService.getDashboardCharts(),
     dashboardService.getRecentActivities(10),
-    dashboardService.getDashboardAlerts(8),
+    dashboardService.getDashboardAlerts(8, req.user),
     dashboardService.getLiveVehicles(),
   ]);
 

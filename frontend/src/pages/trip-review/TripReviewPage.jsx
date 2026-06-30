@@ -36,6 +36,26 @@ const tripGridSx = {
   border: 'none',
   bgcolor: 'background.paper',
   '& .MuiDataGrid-columnHeaders': { bgcolor: 'background.default' },
+  '& .MuiDataGrid-columnHeaderTitle': { fontSize: '0.8125rem', fontWeight: 600 },
+  '& .MuiDataGrid-cell': { display: 'flex', alignItems: 'center', fontSize: '0.8125rem' },
+};
+
+const TruncatedCell = ({ value, title }) => {
+  const text = value || '—';
+  return (
+    <Tooltip title={title || text} arrow placement="top-start">
+      <Typography variant="body2" noWrap sx={{ width: '100%', fontSize: '0.8125rem', lineHeight: 1.4 }}>
+        {text}
+      </Typography>
+    </Tooltip>
+  );
+};
+
+const formatRouteLabel = (origin, destination) => {
+  const from = formatLocation(origin);
+  const to = formatLocation(destination);
+  if (from === '—' && to === '—') return '—';
+  return `${from} → ${to}`;
 };
 
 const TripReviewPage = () => {
@@ -79,73 +99,78 @@ const TripReviewPage = () => {
       {
         field: 'tripNumber',
         headerName: 'Trip #',
-        flex: 1,
-        minWidth: 120,
-        renderCell: ({ row }) => (
-          <Typography variant="body2" fontWeight={700}>
-            {row.tripNumber}
+        width: 128,
+        renderCell: ({ value }) => (
+          <Typography variant="body2" fontWeight={700} noWrap sx={{ fontSize: '0.8125rem' }}>
+            {value}
           </Typography>
         ),
       },
       {
         field: 'driver',
         headerName: 'Driver',
-        flex: 1,
-        minWidth: 140,
+        width: 112,
         valueGetter: (_, row) => row.driver?.name || '—',
+        renderCell: ({ value }) => <TruncatedCell value={value} />,
       },
       {
         field: 'vehicle',
         headerName: 'Vehicle',
-        flex: 1,
-        minWidth: 120,
+        width: 92,
         valueGetter: (_, row) => row.vehicle?.vehicleNumber || '—',
+        renderCell: ({ value }) => <TruncatedCell value={value} />,
       },
       {
         field: 'route',
         headerName: 'Route',
-        flex: 1.5,
-        minWidth: 180,
-        valueGetter: (_, row) => `${formatLocation(row.origin)} → ${formatLocation(row.destination)}`,
+        flex: 1,
+        minWidth: 100,
+        sortable: false,
+        valueGetter: (_, row) => formatRouteLabel(row.origin, row.destination),
+        renderCell: ({ row }) => {
+          const label = formatRouteLabel(row.origin, row.destination);
+          return <TruncatedCell value={label} title={label} />;
+        },
       },
       {
         field: 'distance',
         headerName: 'Distance',
-        width: 100,
+        width: 82,
         valueFormatter: (value) => formatDistance(value),
       },
       {
         field: 'expenses',
-        headerName: 'Driver Expenses',
-        width: 130,
+        headerName: 'Expenses',
+        width: 96,
         valueFormatter: (value) => formatCurrency(value),
       },
       {
         field: 'submittedAt',
         headerName: 'Submitted',
-        width: 150,
+        width: 112,
         valueFormatter: (value) => (value ? format(new Date(value), 'MMM d, HH:mm') : '—'),
       },
       {
         field: 'status',
         headerName: 'Status',
-        width: 140,
+        width: 122,
         renderCell: ({ value }) => (
           <Chip label={statusLabels[value] || value} size="small" color={statusColors[value] || 'default'} />
         ),
       },
       {
         field: 'actions',
-        headerName: '',
-        width: 100,
+        headerName: 'Actions',
+        width: 108,
         sortable: false,
         renderCell: ({ row }) => (
           <Tooltip title="Review & close trip">
             <Button
               size="small"
               variant="contained"
-              startIcon={<RateReviewIcon />}
+              startIcon={<RateReviewIcon sx={{ fontSize: 16 }} />}
               onClick={() => setReviewTripId(row.id)}
+              sx={{ minWidth: 0, px: 1.25, fontSize: '0.75rem', whiteSpace: 'nowrap' }}
             >
               Review
             </Button>
@@ -227,27 +252,29 @@ const TripReviewPage = () => {
         />
       </Card>
 
-      <Card sx={{ height: 520, p: 1 }}>
+      <Card sx={{ height: 520, p: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {isError ? (
           <ErrorState title="Failed to load pending trips" onRetry={refetch} />
         ) : (
-          <DataGrid
-            rows={trips}
-            columns={columns}
-            getRowId={(row) => row.id}
-            loading={isLoading || isFetching}
-            rowCount={pagination?.total ?? 0}
-            paginationMode="server"
-            paginationModel={{ page, pageSize }}
-            onPaginationModelChange={(model) => {
-              setPage(model.page);
-              setPageSize(model.pageSize);
-            }}
-            pageSizeOptions={[10, 25, 50]}
-            disableRowSelectionOnClick
-            sx={tripGridSx}
-            onRowDoubleClick={(params) => setReviewTripId(params.row.id)}
-          />
+          <Box sx={{ flex: 1, minHeight: 0, minWidth: 0, width: '100%' }}>
+            <DataGrid
+              rows={trips}
+              columns={columns}
+              getRowId={(row) => row.id}
+              loading={isLoading || isFetching}
+              rowCount={pagination?.total ?? 0}
+              paginationMode="server"
+              paginationModel={{ page, pageSize }}
+              onPaginationModelChange={(model) => {
+                setPage(model.page);
+                setPageSize(model.pageSize);
+              }}
+              pageSizeOptions={[10, 25, 50]}
+              disableRowSelectionOnClick
+              sx={tripGridSx}
+              onRowDoubleClick={(params) => setReviewTripId(params.row.id)}
+            />
+          </Box>
         )}
       </Card>
 

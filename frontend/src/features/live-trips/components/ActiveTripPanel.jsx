@@ -5,22 +5,32 @@ import {
   Card,
   CardContent,
   Chip,
-  Divider,
   Grid,
   List,
   ListItem,
   ListItemText,
   TextField,
-  MenuItem,
   Typography,
   CircularProgress,
   IconButton,
   Tooltip,
+  Paper,
+  Stack,
+  alpha,
+  useTheme,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ReceiptIcon from '@mui/icons-material/Receipt';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import LocalShippingIcon from '@mui/icons-material/LocalShipping';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import InventoryIcon from '@mui/icons-material/Inventory';
+import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
+import DoneAllIcon from '@mui/icons-material/DoneAll';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
+import SaveIcon from '@mui/icons-material/Save';
 import { format } from 'date-fns';
 import { useSnackbar } from 'notistack';
 import { CONSIGNMENT_STATUS } from '../../../constants';
@@ -37,30 +47,99 @@ import {
   formatLocation,
   expenseCategoryLabels,
   consignmentStatusLabels,
+  consignmentStatusColors,
+  consignmentStatusOrder,
 } from '../../trips/utils/tripUtils';
 import ExpenseFormDialog from './ExpenseFormDialog';
 import { useGetTripMetaFuelStationsQuery } from '../../../redux/api/tripsApi';
 
+const consignmentStatusIcons = {
+  [CONSIGNMENT_STATUS.PICKED_UP]: InventoryIcon,
+  [CONSIGNMENT_STATUS.IN_TRANSIT]: DirectionsCarIcon,
+  [CONSIGNMENT_STATUS.DELIVERED]: DoneAllIcon,
+  [CONSIGNMENT_STATUS.PARTIAL]: WarningAmberIcon,
+  [CONSIGNMENT_STATUS.FAILED]: ErrorOutlineIcon,
+};
+
+const ConsignmentStatusCard = ({ status, selected, onSelect, theme }) => {
+  const Icon = consignmentStatusIcons[status];
+  const colorKey = consignmentStatusColors[status] || 'default';
+  const paletteColor =
+    colorKey === 'default' ? theme.palette.text.secondary : theme.palette[colorKey]?.main || theme.palette.primary.main;
+
+  return (
+    <Paper
+      component="button"
+      type="button"
+      onClick={() => onSelect(status)}
+      elevation={0}
+      sx={{
+        p: 1.5,
+        width: '100%',
+        textAlign: 'left',
+        cursor: 'pointer',
+        border: 2,
+        borderColor: selected ? paletteColor : 'divider',
+        borderRadius: 2,
+        bgcolor: selected ? alpha(paletteColor, 0.08) : 'background.paper',
+        transition: 'border-color 0.2s, background-color 0.2s, transform 0.15s',
+        '&:hover': {
+          borderColor: paletteColor,
+          bgcolor: alpha(paletteColor, 0.05),
+          transform: 'translateY(-1px)',
+        },
+      }}
+    >
+      <Stack direction="row" spacing={1.25} alignItems="center">
+        {Icon && (
+          <Box
+            sx={{
+              width: 36,
+              height: 36,
+              borderRadius: 1.5,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: alpha(paletteColor, selected ? 0.18 : 0.1),
+              color: paletteColor,
+            }}
+          >
+            <Icon fontSize="small" />
+          </Box>
+        )}
+        <Box flex={1} minWidth={0}>
+          <Typography variant="body2" fontWeight={selected ? 700 : 600} noWrap>
+            {consignmentStatusLabels[status]}
+          </Typography>
+        </Box>
+        {selected && <CheckCircleIcon sx={{ color: paletteColor, fontSize: 20 }} />}
+      </Stack>
+    </Paper>
+  );
+};
+
 const ActiveTripPanel = ({ trip, scheduledTrips = [], onStartTrip, startingTrip, onTripCompleted }) => {
+  const theme = useTheme();
   const { enqueueSnackbar } = useSnackbar();
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [consignment, setConsignment] = useState({
-    referenceNumber: '',
     description: '',
-    status: CONSIGNMENT_STATUS.PENDING,
+    status: CONSIGNMENT_STATUS.IN_TRANSIT,
     notes: '',
   });
 
+  const consignmentSyncKey = trip?.consignment?.updatedAt
+    ? new Date(trip.consignment.updatedAt).getTime()
+    : 0;
+
   useEffect(() => {
-    if (trip?.consignment) {
-      setConsignment({
-        referenceNumber: trip.consignment.referenceNumber || '',
-        description: trip.consignment.description || '',
-        status: trip.consignment.status || CONSIGNMENT_STATUS.PENDING,
-        notes: trip.consignment.notes || '',
-      });
-    }
-  }, [trip?.id, trip?.consignment]);
+    if (!trip?.consignment) return;
+    setConsignment({
+      description: trip.consignment.description || '',
+      status: trip.consignment.status || CONSIGNMENT_STATUS.IN_TRANSIT,
+      notes: trip.consignment.notes || '',
+    });
+  }, [trip?.id, consignmentSyncKey]);
 
   const [addExpense, { isLoading: addingExpense }] = useAddTripExpenseMutation();
   const [updateConsignment, { isLoading: updatingConsignment }] = useUpdateConsignmentMutation();
@@ -133,12 +212,38 @@ const ActiveTripPanel = ({ trip, scheduledTrips = [], onStartTrip, startingTrip,
 
   const handleConsignmentSave = async () => {
     try {
-      await updateConsignment({ tripId: trip.id, ...consignment }).unwrap();
+      const result = await updateConsignment({ tripId: trip.id, ...consignment }).unwrap();
+      const updated = result?.data?.consignment;
+      if (updated) {
+        setConsignment({
+          description: updated.description || '',
+          status: updated.status || CONSIGNMENT_STATUS.IN_TRANSIT,
+          notes: updated.notes || '',
+        });
+      }
       enqueueSnackbar('Consignment status updated', { variant: 'success' });
     } catch (err) {
       enqueueSnackbar(err?.data?.message || 'Update failed', { variant: 'error' });
     }
   };
+
+  const handleCopyReference = async () => {
+    const ref = trip.consignment?.referenceNumber;
+    if (!ref) return;
+    try {
+      await navigator.clipboard.writeText(ref);
+      enqueueSnackbar('Reference copied', { variant: 'info' });
+    } catch {
+      enqueueSnackbar('Could not copy reference', { variant: 'warning' });
+    }
+  };
+
+  const referenceNumber = trip.consignment?.referenceNumber || '';
+  const consignmentUpdatedAt = trip.consignment?.updatedAt;
+  const hasConsignmentChanges =
+    consignment.description !== (trip.consignment?.description || '') ||
+    consignment.status !== (trip.consignment?.status || CONSIGNMENT_STATUS.IN_TRANSIT) ||
+    consignment.notes !== (trip.consignment?.notes || '');
 
   const handleCompleteTrip = async () => {
     try {
@@ -198,42 +303,107 @@ const ActiveTripPanel = ({ trip, scheduledTrips = [], onStartTrip, startingTrip,
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} gutterBottom>
-            Consignment Status
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                label="Reference Number"
+      <Card
+        sx={{
+          overflow: 'visible',
+          border: 1,
+          borderColor: alpha(theme.palette.primary.main, 0.12),
+        }}
+      >
+        <Box
+          sx={{
+            px: 2.5,
+            py: 2,
+            bgcolor: alpha(theme.palette.primary.main, 0.04),
+            borderBottom: 1,
+            borderColor: 'divider',
+          }}
+        >
+          <Stack direction="row" alignItems="center" spacing={1.5}>
+            <Box
+              sx={{
+                width: 40,
+                height: 40,
+                borderRadius: 2,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: alpha(theme.palette.primary.main, 0.12),
+                color: 'primary.main',
+              }}
+            >
+              <LocalShippingIcon />
+            </Box>
+            <Box flex={1}>
+              <Typography variant="subtitle1" fontWeight={700}>
+                Consignment Status
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Reference is assigned automatically when the trip starts
+              </Typography>
+            </Box>
+            {consignment.status && (
+              <Chip
+                label={consignmentStatusLabels[consignment.status]}
+                color={consignmentStatusColors[consignment.status] || 'default'}
                 size="small"
-                fullWidth
-                value={consignment.referenceNumber}
-                onChange={(e) => setConsignment((c) => ({ ...c, referenceNumber: e.target.value }))}
+                sx={{ fontWeight: 600 }}
               />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                select
-                label="Status"
-                size="small"
-                fullWidth
-                value={consignment.status}
-                onChange={(e) => setConsignment((c) => ({ ...c, status: e.target.value }))}
-              >
-                {Object.values(CONSIGNMENT_STATUS).map((s) => (
-                  <MenuItem key={s} value={s}>
-                    {consignmentStatusLabels[s]}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Grid>
+            )}
+          </Stack>
+        </Box>
+
+        <CardContent sx={{ pt: 2.5 }}>
+          <Paper
+            variant="outlined"
+            sx={{
+              p: 2,
+              mb: 2.5,
+              borderRadius: 2,
+              bgcolor: alpha(theme.palette.info.main, 0.04),
+              borderColor: alpha(theme.palette.info.main, 0.2),
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" fontWeight={600} letterSpacing={0.5}>
+              REFERENCE NUMBER
+            </Typography>
+            <Stack direction="row" alignItems="center" spacing={1} mt={0.5}>
+              <Typography variant="h6" fontWeight={700} fontFamily="monospace" sx={{ letterSpacing: 1 }}>
+                {referenceNumber || '—'}
+              </Typography>
+              {referenceNumber && (
+                <Tooltip title="Copy reference">
+                  <IconButton size="small" onClick={handleCopyReference}>
+                    <ContentCopyIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Stack>
+          </Paper>
+
+          <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+            Update delivery status
+          </Typography>
+          <Grid container spacing={1.5} mb={2.5}>
+            {consignmentStatusOrder.map((status) => (
+              <Grid item xs={6} sm={4} key={status}>
+                <ConsignmentStatusCard
+                  status={status}
+                  selected={consignment.status === status}
+                  onSelect={(nextStatus) => setConsignment((c) => ({ ...c, status: nextStatus }))}
+                  theme={theme}
+                />
+              </Grid>
+            ))}
+          </Grid>
+
+          <Grid container spacing={2}>
             <Grid item xs={12}>
               <TextField
                 label="Consignment Description"
                 size="small"
                 fullWidth
+                placeholder="What is being transported?"
                 value={consignment.description}
                 onChange={(e) => setConsignment((c) => ({ ...c, description: e.target.value }))}
               />
@@ -245,14 +415,27 @@ const ActiveTripPanel = ({ trip, scheduledTrips = [], onStartTrip, startingTrip,
                 fullWidth
                 multiline
                 rows={2}
+                placeholder="Delivery notes, recipient details, or issues..."
                 value={consignment.notes}
                 onChange={(e) => setConsignment((c) => ({ ...c, notes: e.target.value }))}
               />
             </Grid>
             <Grid item xs={12}>
-              <Button variant="outlined" onClick={handleConsignmentSave} disabled={updatingConsignment}>
-                {updatingConsignment ? <CircularProgress size={20} /> : 'Update Consignment'}
-              </Button>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1}>
+                <Typography variant="caption" color="text.secondary">
+                  {consignmentUpdatedAt
+                    ? `Last updated ${format(new Date(consignmentUpdatedAt), 'MMM d, yyyy · HH:mm')}`
+                    : 'Not updated yet'}
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={updatingConsignment ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+                  onClick={handleConsignmentSave}
+                  disabled={updatingConsignment || !hasConsignmentChanges}
+                >
+                  Save Consignment
+                </Button>
+              </Stack>
             </Grid>
           </Grid>
         </CardContent>

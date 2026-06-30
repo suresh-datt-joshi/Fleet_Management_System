@@ -2,7 +2,17 @@ import catchAsync from '../utils/catchAsync.js';
 import * as maintenanceService from '../services/maintenanceService.js';
 
 export const getMaintenanceRecords = catchAsync(async (req, res) => {
-  const result = await maintenanceService.getMaintenanceRecords(req.query);
+  const result = await maintenanceService.getMaintenanceRecords(req.query, req.user);
+  res.status(200).json({ success: true, data: result });
+});
+
+export const getMyAssignedMaintenance = catchAsync(async (req, res) => {
+  const result = await maintenanceService.getMyAssignedMaintenance(req.query, req.user);
+  res.status(200).json({ success: true, data: result });
+});
+
+export const getVehicleMaintenanceLogs = catchAsync(async (req, res) => {
+  const result = await maintenanceService.getVehicleMaintenanceLogs(req.params.vehicleId, req.query);
   res.status(200).json({ success: true, data: result });
 });
 
@@ -52,18 +62,25 @@ export const deleteMaintenance = catchAsync(async (req, res) => {
 });
 
 export const assignMechanic = catchAsync(async (req, res) => {
-  const record = await maintenanceService.assignMechanic(req.params.id, req.body.mechanicId, req.user._id);
-  res.status(200).json({ success: true, message: 'Mechanic assigned successfully', data: { record } });
+  const record = await maintenanceService.assignMechanic(req.params.id, req.body, req.user._id);
+  res.status(200).json({ success: true, message: 'Mechanic(s) assigned successfully', data: { record } });
 });
 
 export const startMaintenance = catchAsync(async (req, res) => {
-  const record = await maintenanceService.startMaintenance(req.params.id, req.user._id);
+  const record = await maintenanceService.startMaintenance(req.params.id, req.user._id, req.user);
   res.status(200).json({ success: true, message: 'Work order started', data: { record } });
 });
 
 export const completeMaintenance = catchAsync(async (req, res) => {
-  const record = await maintenanceService.completeMaintenance(req.params.id, req.body, req.user._id);
-  res.status(200).json({ success: true, message: 'Work order completed', data: { record } });
+  const files = req.files || [];
+  const record = await maintenanceService.completeMaintenance(
+    req.params.id,
+    req.body,
+    files,
+    req.user._id,
+    req.user
+  );
+  res.status(200).json({ success: true, message: 'Maintenance report submitted successfully', data: { record } });
 });
 
 export const getHistory = catchAsync(async (req, res) => {
@@ -72,7 +89,7 @@ export const getHistory = catchAsync(async (req, res) => {
 });
 
 export const exportCSV = catchAsync(async (req, res) => {
-  const csv = await maintenanceService.exportMaintenanceCSV(req.query);
+  const csv = await maintenanceService.exportMaintenanceCSV(req.query, req.user);
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename=maintenance-${Date.now()}.csv`);
   res.status(200).send(csv);

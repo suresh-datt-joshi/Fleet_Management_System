@@ -2,12 +2,12 @@ import catchAsync from '../utils/catchAsync.js';
 import * as alertService from '../services/alertService.js';
 
 export const getAlerts = catchAsync(async (req, res) => {
-  const result = await alertService.getAlerts(req.query);
+  const result = await alertService.getAlerts(req.query, req.user);
   res.status(200).json({ success: true, data: result });
 });
 
 export const getAlertStats = catchAsync(async (req, res) => {
-  const stats = await alertService.getAlertStats();
+  const stats = await alertService.getAlertStats(req.user);
   res.status(200).json({ success: true, data: stats });
 });
 
@@ -47,7 +47,7 @@ export const markAlertAsRead = catchAsync(async (req, res) => {
 });
 
 export const markAllAlertsAsRead = catchAsync(async (req, res) => {
-  const result = await alertService.markAllAlertsAsRead();
+  const result = await alertService.markAllAlertsAsRead(req.user);
   res.status(200).json({ success: true, message: 'All alerts marked as read', data: result });
 });
 

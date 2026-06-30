@@ -6,6 +6,7 @@ const partsValidator = [
   body('parts.*.name').trim().notEmpty().withMessage('Part name is required'),
   body('parts.*.quantity').optional().isInt({ min: 1 }),
   body('parts.*.cost').optional().isFloat({ min: 0 }),
+  body('parts.*.supplier').optional().trim(),
 ];
 
 export const createMaintenanceValidator = [
@@ -16,11 +17,11 @@ export const createMaintenanceValidator = [
   body('priority').optional().isIn(Object.values(MAINTENANCE_PRIORITY)),
   body('scheduledDate').isISO8601().withMessage('Valid scheduled date is required'),
   body('assignedMechanicId').optional({ nullable: true }).isMongoId(),
+  body('assignedMechanicIds').optional().isArray({ max: 10 }),
+  body('assignedMechanicIds.*').isMongoId().withMessage('Valid mechanic ID is required'),
   body('odometerAtService').optional().isFloat({ min: 0 }),
-  body('laborCost').optional().isFloat({ min: 0 }),
   body('serviceProvider').optional().trim(),
   body('notes').optional().trim().isLength({ max: 1000 }),
-  ...partsValidator,
 ];
 
 export const updateMaintenanceValidator = [
@@ -32,26 +33,35 @@ export const updateMaintenanceValidator = [
   body('priority').optional().isIn(Object.values(MAINTENANCE_PRIORITY)),
   body('scheduledDate').optional().isISO8601(),
   body('odometerAtService').optional().isFloat({ min: 0 }),
-  body('laborCost').optional().isFloat({ min: 0 }),
   body('serviceProvider').optional().trim(),
   body('notes').optional().trim().isLength({ max: 1000 }),
-  ...partsValidator,
 ];
 
 export const maintenanceIdValidator = [param('id').isMongoId().withMessage('Invalid work order ID')];
 
+export const vehicleIdParamValidator = [param('vehicleId').isMongoId().withMessage('Invalid vehicle ID')];
+
 export const assignMechanicValidator = [
   param('id').isMongoId().withMessage('Invalid work order ID'),
-  body('mechanicId').isMongoId().withMessage('Valid mechanic ID is required'),
+  body('mechanicId').optional().isMongoId().withMessage('Valid mechanic ID is required'),
+  body('mechanicIds').optional().isArray({ min: 1, max: 10 }),
+  body('mechanicIds.*').isMongoId().withMessage('Valid mechanic ID is required'),
+  body().custom((_, { req }) => {
+    if (!req.body.mechanicId && (!req.body.mechanicIds || req.body.mechanicIds.length === 0)) {
+      throw new Error('At least one mechanic must be assigned');
+    }
+    return true;
+  }),
 ];
 
 export const completeMaintenanceValidator = [
   param('id').isMongoId().withMessage('Invalid work order ID'),
   body('laborCost').optional().isFloat({ min: 0 }),
+  body('laborHours').optional().isFloat({ min: 0 }),
+  body('workPerformed').optional().trim().isLength({ max: 5000 }),
   body('odometerAtService').optional().isFloat({ min: 0 }),
   body('notes').optional().trim().isLength({ max: 1000 }),
   body('completedDate').optional().isISO8601(),
-  ...partsValidator,
 ];
 
 export const listMaintenanceValidator = [
@@ -62,6 +72,7 @@ export const listMaintenanceValidator = [
   query('priority').optional().isIn(Object.values(MAINTENANCE_PRIORITY)),
   query('vehicleId').optional().isMongoId(),
   query('mechanicId').optional().isMongoId(),
+  query('assignedToMe').optional().isIn(['true', 'false']),
   query('from').optional().isISO8601(),
   query('to').optional().isISO8601(),
   query('search').optional().trim(),

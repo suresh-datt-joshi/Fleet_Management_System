@@ -32,17 +32,20 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 import BuildIcon from '@mui/icons-material/Build';
 import WarningIcon from '@mui/icons-material/Warning';
 import { useSnackbar } from 'notistack';
 import { format } from 'date-fns';
 import { usePermissions } from '../../hooks/usePermissions';
-import { PERMISSIONS } from '../../constants';
+import { useAuth } from '../../hooks/useAuth';
+import { PERMISSIONS, USER_ROLES } from '../../constants';
 import {
   useGetMaintenanceStatsQuery,
   useGetMaintenanceAnalyticsQuery,
   useGetUpcomingMaintenanceQuery,
   useGetMaintenanceRecordsQuery,
+  useGetMyAssignedMaintenanceQuery,
   useGetMaintenanceMetaVehiclesQuery,
   useGetMaintenanceMetaMechanicsQuery,
   useCreateMaintenanceMutation,
@@ -55,8 +58,10 @@ import {
 } from '../../redux/api/maintenanceApi';
 import MaintenanceFormDialog from '../../features/maintenance/components/MaintenanceFormDialog';
 import MaintenanceDetailDrawer from '../../features/maintenance/components/MaintenanceDetailDrawer';
+import MaintenanceReportDialog from '../../features/maintenance/components/MaintenanceReportDialog';
 import AssignMechanicDialog from '../../features/maintenance/components/AssignMechanicDialog';
 import MaintenanceAnalyticsPanel from '../../features/maintenance/components/MaintenanceAnalyticsPanel';
+import MaintenanceLogsPanel from '../../features/maintenance/components/MaintenanceLogsPanel';
 import {
   MAINTENANCE_STATUS,
   MAINTENANCE_TYPE,
@@ -65,25 +70,37 @@ import {
   typeLabels,
   formatCurrency,
   canStart,
+  canComplete,
   canEdit,
   canDelete,
+  getMechanicNames,
+  canActOnWorkOrder,
 } from '../../features/maintenance/utils/maintenanceUtils';
 import ErrorState from '../../components/common/ErrorState';
 import StatCard from '../../features/dashboard/components/StatCard';
 
+const TAB = {
+  WORK_ORDERS: 'work-orders',
+  MY_WORK: 'my-work',
+  LOGS: 'logs',
+  UPCOMING: 'upcoming',
+  ANALYTICS: 'analytics',
+};
+
 const MaintenancePage = () => {
   const { enqueueSnackbar } = useSnackbar();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, hasRole } = usePermissions();
+  const { user } = useAuth();
   const canManage = hasPermission(PERMISSIONS.MANAGE_MAINTENANCE);
   const canAssign = hasPermission(PERMISSIONS.ASSIGN_WORK_ORDERS);
+  const isMechanic = hasRole(USER_ROLES.MECHANIC);
 
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(isMechanic ? TAB.MY_WORK : TAB.WORK_ORDERS);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
 
   const [formOpen, setFormOpen] = useState(false);
   const [editRecord, setEditRecord] = useState(null);
@@ -91,6 +108,8 @@ const MaintenancePage = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [assignRecord, setAssignRecord] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [reportRecord, setReportRecord] = useState(null);
+  const [reportOpen, setReportOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
   const queryParams = useMemo(
@@ -99,18 +118,23 @@ const MaintenancePage = () => {
       limit: pageSize,
       search: search || undefined,
       status: statusFilter || undefined,
-      type: typeFilter || undefined,
       sort: 'scheduledDate:desc',
     }),
-    [page, pageSize, search, statusFilter, typeFilter]
+    [page, pageSize, search, statusFilter]
   );
 
   const { data: statsData } = useGetMaintenanceStatsQuery();
   const { data: analyticsData, isLoading: analyticsLoading } = useGetMaintenanceAnalyticsQuery({ months: 6 });
-  const { data: upcomingData } = useGetUpcomingMaintenanceQuery({ days: 14, limit: 10 }, { skip: tab !== 1 });
+  const { data: upcomingData } = useGetUpcomingMaintenanceQuery({ days: 14, limit: 10 }, { skip: tab !== TAB.UPCOMING });
   const { data, isLoading, isError, error, refetch, isFetching } = useGetMaintenanceRecordsQuery(queryParams, {
-    skip: tab !== 0,
+    skip: tab !== TAB.WORK_ORDERS,
   });
+  const {
+    data: myData,
+    isLoading: myLoading,
+    isFetching: myFetching,
+    refetch: refetchMy,
+  } = useGetMyAssignedMaintenanceQuery(queryParams, { skip: tab !== TAB.MY_WORK });
   const { data: vehiclesData } = useGetMaintenanceMetaVehiclesQuery(undefined, { skip: !formOpen });
   const { data: mechanicsData } = useGetMaintenanceMetaMechanicsQuery(undefined, {
     skip: !formOpen && !assignOpen,
@@ -121,13 +145,14 @@ const MaintenancePage = () => {
   const [deleteRecord] = useDeleteMaintenanceMutation();
   const [assignMechanic, { isLoading: assigning }] = useAssignMechanicMutation();
   const [startMaintenance, { isLoading: starting }] = useStartMaintenanceMutation();
-  const [completeMaintenance] = useCompleteMaintenanceMutation();
+  const [completeMaintenance, { isLoading: completing }] = useCompleteMaintenanceMutation();
   const [exportMaintenance] = useExportMaintenanceMutation();
 
   const stats = statsData?.data;
-  const records = data?.data?.records || [];
-  const pagination = data?.data?.pagination || {};
+  const records = tab === TAB.MY_WORK ? myData?.data?.records || [] : data?.data?.records || [];
+  const pagination = tab === TAB.MY_WORK ? myData?.data?.pagination || {} : data?.data?.pagination || {};
   const upcoming = upcomingData?.data || [];
+  const listLoading = tab === TAB.MY_WORK ? myLoading || myFetching : isLoading || isFetching;
 
   const handleFormSubmit = async (payload) => {
     try {
@@ -136,7 +161,7 @@ const MaintenancePage = () => {
         enqueueSnackbar('Work order updated', { variant: 'success' });
       } else {
         await createRecord(payload).unwrap();
-        enqueueSnackbar('Work order created', { variant: 'success' });
+        enqueueSnackbar('Maintenance scheduled successfully', { variant: 'success' });
       }
       setFormOpen(false);
       setEditRecord(null);
@@ -145,11 +170,11 @@ const MaintenancePage = () => {
     }
   };
 
-  const handleAssign = async ({ mechanicId }) => {
+  const handleAssign = async ({ mechanicIds }) => {
     if (!assignRecord) return;
     try {
-      const result = await assignMechanic({ id: assignRecord.id, mechanicId }).unwrap();
-      enqueueSnackbar('Mechanic assigned', { variant: 'success' });
+      const result = await assignMechanic({ id: assignRecord.id, mechanicIds }).unwrap();
+      enqueueSnackbar('Mechanics assigned', { variant: 'success' });
       if (detailRecord?.id === assignRecord.id) setDetailRecord(result.data.record);
       setAssignOpen(false);
       setAssignRecord(null);
@@ -162,7 +187,7 @@ const MaintenancePage = () => {
     async (id) => {
       try {
         const result = await startMaintenance(id).unwrap();
-        enqueueSnackbar('Work order started', { variant: 'success' });
+        enqueueSnackbar('Work started — vehicle status updated', { variant: 'success' });
         if (detailRecord?.id === id) setDetailRecord(result.data.record);
       } catch (err) {
         enqueueSnackbar(err?.data?.message || 'Start failed', { variant: 'error' });
@@ -171,13 +196,21 @@ const MaintenancePage = () => {
     [startMaintenance, enqueueSnackbar, detailRecord]
   );
 
-  const handleComplete = async (record) => {
+  const handleOpenReport = (record) => {
+    setReportRecord(record);
+    setReportOpen(true);
+  };
+
+  const handleReportSubmit = async (payload) => {
+    if (!reportRecord) return;
     try {
-      const result = await completeMaintenance({ id: record.id }).unwrap();
-      enqueueSnackbar('Work order completed', { variant: 'success' });
+      const result = await completeMaintenance({ id: reportRecord.id, ...payload }).unwrap();
+      enqueueSnackbar('Maintenance report submitted — logs updated', { variant: 'success' });
       setDetailRecord(result.data.record);
+      setReportOpen(false);
+      setReportRecord(null);
     } catch (err) {
-      enqueueSnackbar(err?.data?.message || 'Complete failed', { variant: 'error' });
+      enqueueSnackbar(err?.data?.message || 'Report submission failed', { variant: 'error' });
     }
   };
 
@@ -210,10 +243,15 @@ const MaintenancePage = () => {
     }
   };
 
+  const openDetail = (row) => {
+    setDetailRecord(row);
+    setDetailOpen(true);
+  };
+
   const columns = useMemo(
     () => [
       { field: 'workOrderNumber', headerName: 'WO #', width: 130 },
-      { field: 'title', headerName: 'Title', flex: 1, minWidth: 160 },
+      { field: 'title', headerName: 'Issue', flex: 1, minWidth: 160 },
       {
         field: 'vehicle',
         headerName: 'Vehicle',
@@ -243,6 +281,12 @@ const MaintenancePage = () => {
         ),
       },
       {
+        field: 'assignedMechanics',
+        headerName: 'Mechanics',
+        width: 140,
+        valueGetter: (_, row) => getMechanicNames(row),
+      },
+      {
         field: 'scheduledDate',
         headerName: 'Scheduled',
         width: 120,
@@ -257,77 +301,91 @@ const MaintenancePage = () => {
       {
         field: 'actions',
         headerName: 'Actions',
-        width: 140,
+        width: 160,
         sortable: false,
-        renderCell: ({ row }) => (
-          <Box>
-            <Tooltip title="View">
-              <IconButton
-                size="small"
-                onClick={() => {
-                  setDetailRecord(row);
-                  setDetailOpen(true);
-                }}
-              >
-                <VisibilityIcon fontSize="small" />
-              </IconButton>
-            </Tooltip>
-            {canManage && canEdit(row.status) && (
-              <Tooltip title="Edit">
-                <IconButton
-                  size="small"
-                  onClick={() => {
-                    setEditRecord(row);
-                    setFormOpen(true);
-                  }}
-                >
-                  <EditIcon fontSize="small" />
+        renderCell: ({ row }) => {
+          const canAct = canActOnWorkOrder(row, user, canManage);
+          return (
+            <Box>
+              <Tooltip title="View">
+                <IconButton size="small" onClick={() => openDetail(row)}>
+                  <VisibilityIcon fontSize="small" />
                 </IconButton>
               </Tooltip>
-            )}
-            {canManage && canStart(row.status) && (
-              <Tooltip title="Start">
-                <IconButton size="small" color="primary" onClick={() => handleStart(row.id)} disabled={starting}>
-                  <PlayArrowIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {canManage && canDelete(row.status) && (
-              <Tooltip title="Delete">
-                <IconButton size="small" color="error" onClick={() => setDeleteConfirm(row.id)}>
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-          </Box>
-        ),
+              {canManage && canEdit(row.status) && !isMechanic && (
+                <Tooltip title="Edit">
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      setEditRecord(row);
+                      setFormOpen(true);
+                    }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {canAct && canStart(row.status) && (
+                <Tooltip title="Start">
+                  <IconButton size="small" color="primary" onClick={() => handleStart(row.id)} disabled={starting}>
+                    <PlayArrowIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {canAct && canComplete(row.status) && (
+                <Tooltip title="Submit Report">
+                  <IconButton size="small" color="success" onClick={() => handleOpenReport(row)}>
+                    <AssignmentIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+              {canManage && canDelete(row.status) && !isMechanic && (
+                <Tooltip title="Delete">
+                  <IconButton size="small" color="error" onClick={() => setDeleteConfirm(row.id)}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Box>
+          );
+        },
       },
     ],
-    [canManage, handleStart, starting]
+    [canManage, handleStart, starting, user, isMechanic]
   );
 
-  if (isError && tab === 0) {
+  const handleRefresh = () => {
+    if (tab === TAB.MY_WORK) refetchMy();
+    else refetch();
+  };
+
+  if (isError && tab === TAB.WORK_ORDERS) {
     return <ErrorState title="Failed to load maintenance" message={error?.data?.message} onRetry={refetch} />;
   }
 
   return (
     <Box>
       <Box display="flex" alignItems="center" justifyContent="space-between" mb={3} flexWrap="wrap" gap={2}>
-        <Typography variant="h4" fontWeight={700}>
-          Maintenance
-        </Typography>
+        <Box>
+          <Typography variant="h4" fontWeight={700}>
+            Maintenance
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Schedule → Assign → Perform → Report → Log
+          </Typography>
+        </Box>
         <Box display="flex" gap={1}>
-          <Button startIcon={<RefreshIcon />} variant="outlined" onClick={refetch} disabled={isFetching}>
+          <Button startIcon={<RefreshIcon />} variant="outlined" onClick={handleRefresh} disabled={listLoading}>
             Refresh
           </Button>
-          {tab === 0 && (
+          {tab === TAB.WORK_ORDERS && !isMechanic && (
             <Button startIcon={<FileDownloadIcon />} variant="outlined" onClick={handleExport}>
               Export
             </Button>
           )}
-          {canManage && tab === 0 && (
+          {canManage && !isMechanic && (tab === TAB.WORK_ORDERS || tab === TAB.UPCOMING) && (
             <Button startIcon={<AddIcon />} variant="contained" onClick={() => { setEditRecord(null); setFormOpen(true); }}>
-              Create Work Order
+              Schedule Maintenance
             </Button>
           )}
         </Box>
@@ -354,13 +412,15 @@ const MaintenancePage = () => {
         </Grid>
       </Grid>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Work Orders" />
-        <Tab label="Upcoming" />
-        <Tab label="Analytics" />
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }} variant="scrollable" scrollButtons="auto">
+        {!isMechanic && <Tab value={TAB.WORK_ORDERS} label="Work Orders" />}
+        <Tab value={TAB.MY_WORK} label={isMechanic ? 'My Assignments' : 'My Work Orders'} />
+        <Tab value={TAB.LOGS} label="Maintenance Logs" />
+        <Tab value={TAB.UPCOMING} label="Upcoming" />
+        {!isMechanic && <Tab value={TAB.ANALYTICS} label="Analytics" />}
       </Tabs>
 
-      {tab === 0 && (
+      {(tab === TAB.WORK_ORDERS || tab === TAB.MY_WORK) && (
         <>
           <Box display="flex" gap={2} mb={2} flexWrap="wrap">
             <TextField
@@ -386,14 +446,6 @@ const MaintenancePage = () => {
                 </MenuItem>
               ))}
             </TextField>
-            <TextField size="small" select label="Type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} sx={{ minWidth: 130 }}>
-              <MenuItem value="">All</MenuItem>
-              {Object.values(MAINTENANCE_TYPE).map((t) => (
-                <MenuItem key={t} value={t}>
-                  {typeLabels[t]}
-                </MenuItem>
-              ))}
-            </TextField>
             <Button variant="outlined" onClick={() => setSearch(searchInput)}>
               Search
             </Button>
@@ -403,7 +455,7 @@ const MaintenancePage = () => {
               rows={records}
               columns={columns}
               getRowId={(row) => row.id}
-              loading={isLoading || isFetching}
+              loading={listLoading}
               paginationMode="server"
               rowCount={pagination.total || 0}
               paginationModel={{ page, pageSize }}
@@ -419,7 +471,9 @@ const MaintenancePage = () => {
         </>
       )}
 
-      {tab === 1 && (
+      {tab === TAB.LOGS && <MaintenanceLogsPanel onViewRecord={openDetail} />}
+
+      {tab === TAB.UPCOMING && (
         <Card>
           <CardContent>
             <Typography variant="h6" fontWeight={600} gutterBottom>
@@ -433,20 +487,14 @@ const MaintenancePage = () => {
                   <ListItem
                     key={item.id}
                     secondaryAction={
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          setDetailRecord(item);
-                          setDetailOpen(true);
-                        }}
-                      >
+                      <Button size="small" onClick={() => openDetail(item)}>
                         View
                       </Button>
                     }
                   >
                     <ListItemText
                       primary={`${item.workOrderNumber} — ${item.title}`}
-                      secondary={`${item.vehicle?.vehicleNumber} · ${format(new Date(item.scheduledDate), 'MMM d, yyyy')} · ${item.status}`}
+                      secondary={`${item.vehicle?.vehicleNumber} · ${format(new Date(item.scheduledDate), 'MMM d, yyyy')} · ${item.status} · ${getMechanicNames(item)}`}
                     />
                   </ListItem>
                 ))}
@@ -456,7 +504,7 @@ const MaintenancePage = () => {
         </Card>
       )}
 
-      {tab === 2 && (
+      {tab === TAB.ANALYTICS && (
         <MaintenanceAnalyticsPanel analytics={analyticsData?.data} isLoading={analyticsLoading} />
       )}
 
@@ -477,10 +525,19 @@ const MaintenancePage = () => {
         onEdit={(r) => { setEditRecord(r); setFormOpen(true); }}
         onAssign={(r) => { setAssignRecord(r); setAssignOpen(true); }}
         onStart={handleStart}
-        onComplete={handleComplete}
+        onComplete={handleOpenReport}
         canManage={canManage}
         canAssign={canAssign}
         loadingAction={starting}
+        user={user}
+      />
+
+      <MaintenanceReportDialog
+        open={reportOpen}
+        onClose={() => { setReportOpen(false); setReportRecord(null); }}
+        onSubmit={handleReportSubmit}
+        record={reportRecord}
+        isLoading={completing}
       />
 
       <AssignMechanicDialog

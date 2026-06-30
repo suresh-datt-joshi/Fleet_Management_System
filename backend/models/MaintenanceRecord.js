@@ -32,7 +32,9 @@ const maintenanceSchema = new mongoose.Schema(
     scheduledDate: { type: Date, required: true, index: true },
     completedDate: { type: Date, default: null },
     odometerAtService: { type: Number, min: 0, default: 0 },
+    laborHours: { type: Number, min: 0, default: 0 },
     laborCost: { type: Number, min: 0, default: 0 },
+    workPerformed: { type: String, default: '', maxlength: 5000 },
     cost: { type: Number, min: 0, default: 0 },
     priority: {
       type: String,
@@ -46,11 +48,28 @@ const maintenanceSchema = new mongoose.Schema(
       ref: 'User',
       default: null,
     },
+    assignedMechanics: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
     parts: [
       {
         name: { type: String, required: true, trim: true },
         quantity: { type: Number, min: 1, default: 1 },
         cost: { type: Number, min: 0, default: 0 },
+        supplier: { type: String, trim: true, default: '' },
+      },
+    ],
+    attachments: [
+      {
+        fileName: { type: String, required: true },
+        fileUrl: { type: String, required: true },
+        mimeType: { type: String, default: '' },
+        publicId: { type: String, default: null },
+        uploadedAt: { type: Date, default: Date.now },
+        uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
       },
     ],
     ...auditFields,

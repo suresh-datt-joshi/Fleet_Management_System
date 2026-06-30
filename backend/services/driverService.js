@@ -8,6 +8,7 @@ import { objectsToCSV } from '../utils/csvExport.js';
 import { uploadImage, deleteImage } from '../services/cloudinaryService.js';
 import { DRIVER_STATUS, DRIVER_HISTORY_ACTIONS, ACTIVITY_TYPES } from '../constants/enums.js';
 import { linkDriverProfileToUser } from '../utils/driverUserLink.js';
+import { notifyDriverEvent } from './alertService.js';
 
 const vehiclePopulate = {
   path: 'assignedVehicle',
@@ -190,6 +191,14 @@ export const assignVehicle = async (driverId, vehicleId, userId) => {
     userId,
     driver._id
   );
+
+  await notifyDriverEvent(driverId, {
+    title: 'Vehicle Assigned',
+    message: `You have been assigned to vehicle ${vehicle.vehicleNumber}`,
+    entityType: 'vehicle',
+    entityId: vehicle._id,
+    metadata: { vehicleNumber: vehicle.vehicleNumber, event: 'vehicle_assigned' },
+  });
 
   return Driver.findById(driver._id).populate(vehiclePopulate).lean();
 };

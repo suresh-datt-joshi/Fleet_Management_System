@@ -1,6 +1,7 @@
 import TripExpense from '../models/TripExpense.js';
 import Trip from '../models/Trip.js';
 import TripHistory from '../models/TripHistory.js';
+import Vehicle from '../models/Vehicle.js';
 import AppError from '../utils/AppError.js';
 import { uploadFile } from './cloudinaryService.js';
 import { TRIP_STATUS, TRIP_HISTORY_ACTIONS, TRIP_EXPENSE_CATEGORIES } from '../constants/enums.js';
@@ -117,6 +118,9 @@ export const addTripExpense = async (tripId, data, file, userId, user) => {
 
   if (data.category === TRIP_EXPENSE_CATEGORIES.FUEL) {
     try {
+      const vehicleDoc = await Vehicle.findById(trip.vehicle).select('odometer fuelType').lean();
+      const odometer = fuelService.resolveFuelLogOdometer(data.odometer, vehicleDoc?.odometer);
+
       await fuelService.createFuelLog(
         {
           vehicleId: trip.vehicle,
@@ -127,8 +131,8 @@ export const addTripExpense = async (tripId, data, file, userId, user) => {
           cost: Number(data.amount),
           stationId: data.stationId || null,
           fuelStation: data.fuelStation || data.vendor || '',
-          odometer: Number(data.odometer || 0),
-          fuelType: data.fuelType,
+          odometer,
+          fuelType: data.fuelType || vehicleDoc?.fuelType,
           receiptNumber: data.receiptNumber || '',
           isFullTank: data.isFullTank !== false && data.isFullTank !== 'false',
           notes: data.notes || data.description || '',
@@ -164,31 +168,34 @@ export const updateConsignment = async (tripId, data, userId, user) => {
     throw new AppError('Consignment can only be updated while trip is in progress', 400);
   }
 
-  if (!trip.consignment) trip.consignment = {};
+  const $set = {
+    updatedBy: userId,
+    'consignment.updatedAt': new Date(),
+  };
 
-  if (data.referenceNumber !== undefined) trip.consignment.referenceNumber = data.referenceNumber;
-  if (data.description !== undefined) trip.consignment.description = data.description;
-  if (data.status !== undefined) trip.consignment.status = data.status;
-  if (data.notes !== undefined) trip.consignment.notes = data.notes;
-  trip.consignment.updatedAt = new Date();
-  trip.updatedBy = userId;
+  if (data.description !== undefined) $set['consignment.description'] = data.description;
+  if (data.status !== undefined) $set['consignment.status'] = data.status;
+  if (data.notes !== undefined) $set['consignment.notes'] = data.notes;
 
-  await trip.save();
+  await Trip.updateOne({ _id: tripId }, { $set });
+
+  const updated = await Trip.findById(tripId).select('consignment').lean();
+  const consignment = updated?.consignment || {};
 
   await TripHistory.create({
     trip: tripId,
     action: TRIP_HISTORY_ACTIONS.CONSIGNMENT_UPDATED,
-    description: `Consignment status updated to ${data.status || trip.consignment.status}`,
+    description: `Consignment status updated to ${consignment.status || data.status}`,
     performedBy: userId,
     changes: data,
   });
 
   return {
-    referenceNumber: trip.consignment.referenceNumber || '',
-    description: trip.consignment.description || '',
-    status: trip.consignment.status,
-    notes: trip.consignment.notes || '',
-    updatedAt: trip.consignment.updatedAt,
+    referenceNumber: consignment.referenceNumber || '',
+    description: consignment.description || '',
+    status: consignment.status,
+    notes: consignment.notes || '',
+    updatedAt: consignment.updatedAt,
   };
 };
 

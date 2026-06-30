@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Box } from '@mui/material';
 import { GoogleMap, Marker, Polyline, Circle } from '@react-google-maps/api';
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, MAP_CONTAINER_STYLE } from '../utils/mapConstants';
+import { isValidMapCoordinate } from '../../tracking/utils/mapUtils';
 
 const vehicleIcon = (ignition, heading = 0) => ({
   path: window.google?.maps?.SymbolPath?.FORWARD_CLOSED_ARROW || 0,
@@ -22,6 +23,15 @@ const stopIcon = {
   scale: 6,
 };
 
+const companyIcon = {
+  path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+  fillColor: '#1565C0',
+  fillOpacity: 1,
+  strokeColor: '#ffffff',
+  strokeWeight: 2,
+  scale: 10,
+};
+
 const GoogleTrackingMap = ({
   vehicles = [],
   geofences = [],
@@ -30,6 +40,8 @@ const GoogleTrackingMap = ({
   stopMarkers = [],
   selectedVehicleId,
   selectedVehicle,
+  companyLocation = null,
+  hasActiveTrips = false,
   geofencePlacementMode = false,
   onMapClick,
   height = 520,
@@ -37,14 +49,25 @@ const GoogleTrackingMap = ({
   const mapRef = useRef(null);
 
   const center = useMemo(() => {
-    if (selectedVehicle?.location) {
+    if (
+      selectedVehicle?.location &&
+      isValidMapCoordinate(selectedVehicle.location.lat, selectedVehicle.location.lng)
+    ) {
       return { lat: selectedVehicle.location.lat, lng: selectedVehicle.location.lng };
     }
-    if (vehicles[0]?.location) {
-      return { lat: vehicles[0].location.lat, lng: vehicles[0].location.lng };
+    if (hasActiveTrips) {
+      const firstLocatedVehicle = vehicles.find((vehicle) =>
+        isValidMapCoordinate(vehicle.location?.lat, vehicle.location?.lng)
+      );
+      if (firstLocatedVehicle) {
+        return { lat: firstLocatedVehicle.location.lat, lng: firstLocatedVehicle.location.lng };
+      }
+    }
+    if (isValidMapCoordinate(companyLocation?.lat, companyLocation?.lng)) {
+      return { lat: companyLocation.lat, lng: companyLocation.lng };
     }
     return DEFAULT_MAP_CENTER;
-  }, [selectedVehicle, vehicles]);
+  }, [selectedVehicle, vehicles, companyLocation, hasActiveTrips]);
 
   const routePath = useMemo(() => route.map((p) => ({ lat: p.lat, lng: p.lng })), [route]);
   const plannedRoutePath = useMemo(
@@ -65,18 +88,22 @@ const GoogleTrackingMap = ({
 
     if (focusPath) {
       focusPath.forEach((point) => bounds.extend(point));
-    } else {
+    } else if (hasActiveTrips) {
       vehicles.forEach((vehicle) => {
-        if (vehicle.location?.lat && vehicle.location?.lng) {
+        if (isValidMapCoordinate(vehicle.location?.lat, vehicle.location?.lng)) {
           bounds.extend({ lat: vehicle.location.lat, lng: vehicle.location.lng });
         }
       });
+    } else if (isValidMapCoordinate(companyLocation?.lat, companyLocation?.lng)) {
+      mapRef.current.setCenter({ lat: companyLocation.lat, lng: companyLocation.lng });
+      mapRef.current.setZoom(DEFAULT_MAP_ZOOM);
+      return;
     }
 
     if (!bounds.isEmpty()) {
       mapRef.current.fitBounds(bounds, 40);
     }
-  }, [vehicles, routePath, plannedRoutePath, selectedVehicleId]);
+  }, [vehicles, routePath, plannedRoutePath, selectedVehicleId, companyLocation, hasActiveTrips]);
 
   return (
     <Box
@@ -148,8 +175,16 @@ const GoogleTrackingMap = ({
           />
         ))}
 
+        {!hasActiveTrips && isValidMapCoordinate(companyLocation?.lat, companyLocation?.lng) && (
+          <Marker
+            position={{ lat: companyLocation.lat, lng: companyLocation.lng }}
+            icon={companyIcon}
+            title={`Company Location${companyLocation.address ? ` — ${companyLocation.address}` : ''}`}
+          />
+        )}
+
         {vehicles.map((vehicle) => {
-          if (!vehicle.location?.lat || !vehicle.location?.lng) return null;
+          if (!isValidMapCoordinate(vehicle.location?.lat, vehicle.location?.lng)) return null;
           const isSelected = vehicle.id === selectedVehicleId;
 
           return (

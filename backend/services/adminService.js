@@ -36,6 +36,12 @@ const formatSettings = (settings) => {
     companyEmail: s.companyEmail,
     companyPhone: s.companyPhone,
     companyAddress: s.companyAddress,
+    companyLocation: {
+      address: s.companyLocation?.address || '',
+      lat: s.companyLocation?.lat ?? null,
+      lng: s.companyLocation?.lng ?? null,
+      placeId: s.companyLocation?.placeId || '',
+    },
     timezone: s.timezone,
     currency: s.currency,
     dateFormat: s.dateFormat,
@@ -294,6 +300,15 @@ export const updateSettings = async (data, userId) => {
   allowed.forEach((field) => {
     if (data[field] !== undefined) settings[field] = data[field];
   });
+
+  if (data.companyLocation !== undefined) {
+    settings.companyLocation = {
+      address: data.companyLocation.address ?? settings.companyLocation?.address ?? '',
+      lat: data.companyLocation.lat ?? null,
+      lng: data.companyLocation.lng ?? null,
+      placeId: data.companyLocation.placeId ?? settings.companyLocation?.placeId ?? '',
+    };
+  }
 
   settings.updatedBy = userId;
   await settings.save();

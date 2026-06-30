@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useForm, useFieldArray, Controller } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import {
   Dialog,
   DialogTitle,
@@ -9,19 +9,13 @@ import {
   TextField,
   Grid,
   MenuItem,
-  IconButton,
-  Box,
-  Typography,
+  Autocomplete,
+  Chip,
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
 import {
   MAINTENANCE_TYPE,
   MAINTENANCE_PRIORITY,
 } from '../utils/maintenanceUtils';
-import { decimalInputProps, integerInputProps, moneyInputProps } from '../../../utils/numericInputProps';
-
-const defaultPart = () => ({ name: '', quantity: 1, cost: 0 });
 
 const defaultValues = {
   vehicleId: '',
@@ -30,12 +24,9 @@ const defaultValues = {
   type: MAINTENANCE_TYPE.PREVENTIVE,
   priority: MAINTENANCE_PRIORITY.MEDIUM,
   scheduledDate: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
-  assignedMechanicId: '',
-  odometerAtService: '',
-  laborCost: 0,
+  assignedMechanicIds: [],
   serviceProvider: '',
   notes: '',
-  parts: [defaultPart()],
 };
 
 const MaintenanceFormDialog = ({
@@ -46,11 +37,11 @@ const MaintenanceFormDialog = ({
   isLoading,
   vehicles = [],
   mechanics = [],
+  presetVehicleId,
 }) => {
   const isEdit = Boolean(initialData?.id);
 
-  const { control, register, handleSubmit, reset, watch, setValue } = useForm({ defaultValues });
-  const { fields, append, remove } = useFieldArray({ control, name: 'parts' });
+  const { control, register, handleSubmit, reset } = useForm({ defaultValues });
 
   useEffect(() => {
     if (open) {
@@ -64,42 +55,40 @@ const MaintenanceFormDialog = ({
           scheduledDate: initialData.scheduledDate
             ? new Date(initialData.scheduledDate).toISOString().slice(0, 16)
             : defaultValues.scheduledDate,
-          assignedMechanicId: initialData.assignedMechanic?.id || '',
-          odometerAtService: initialData.odometerAtService ?? '',
-          laborCost: initialData.laborCost ?? 0,
+          assignedMechanicIds: initialData.assignedMechanics?.length
+            ? initialData.assignedMechanics.map((m) => m.id)
+            : initialData.assignedMechanic?.id
+              ? [initialData.assignedMechanic.id]
+              : [],
           serviceProvider: initialData.serviceProvider || '',
           notes: initialData.notes || '',
-          parts: initialData.parts?.length
-            ? initialData.parts.map((p) => ({ name: p.name, quantity: p.quantity, cost: p.cost }))
-            : [defaultPart()],
         });
       } else {
-        reset(defaultValues);
+        reset({
+          ...defaultValues,
+          vehicleId: presetVehicleId || '',
+        });
       }
     }
-  }, [open, initialData, reset]);
+  }, [open, initialData, presetVehicleId, reset]);
 
   const submit = (data) => {
     onSubmit({
-      ...data,
       vehicleId: data.vehicleId,
-      assignedMechanicId: data.assignedMechanicId || null,
-      odometerAtService: Number(data.odometerAtService || 0),
-      laborCost: Number(data.laborCost || 0),
+      title: data.title,
+      description: data.description || '',
+      type: data.type,
+      priority: data.priority,
       scheduledDate: new Date(data.scheduledDate).toISOString(),
-      parts: data.parts
-        .filter((p) => p.name.trim())
-        .map((p) => ({
-          name: p.name,
-          quantity: Number(p.quantity || 1),
-          cost: Number(p.cost || 0),
-        })),
+      assignedMechanicIds: data.assignedMechanicIds || [],
+      serviceProvider: data.serviceProvider || '',
+      notes: data.notes || '',
     });
   };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>{isEdit ? 'Edit Work Order' : 'Create Work Order'}</DialogTitle>
+      <DialogTitle>{isEdit ? 'Edit Work Order' : 'Schedule Maintenance'}</DialogTitle>
       <form onSubmit={handleSubmit(submit)}>
         <DialogContent dividers>
           <Grid container spacing={2}>
@@ -109,7 +98,7 @@ const MaintenanceFormDialog = ({
                 control={control}
                 rules={{ required: true }}
                 render={({ field }) => (
-                  <TextField {...field} fullWidth select label="Vehicle" required>
+                  <TextField {...field} fullWidth select label="Vehicle" required disabled={Boolean(presetVehicleId)}>
                     {vehicles.map((v) => (
                       <MenuItem key={v.id} value={v.id}>
                         {v.vehicleNumber} — {v.manufacturer} {v.model}
@@ -121,32 +110,49 @@ const MaintenanceFormDialog = ({
             </Grid>
             <Grid item xs={12} sm={6}>
               <Controller
-                name="assignedMechanicId"
+                name="assignedMechanicIds"
                 control={control}
                 render={({ field }) => (
-                  <TextField {...field} fullWidth select label="Mechanic">
-                    <MenuItem value="">Unassigned</MenuItem>
-                    {mechanics.map((m) => (
-                      <MenuItem key={m.id} value={m.id}>
-                        {m.name}
-                      </MenuItem>
-                    ))}
-                  </TextField>
+                  <Autocomplete
+                    multiple
+                    options={mechanics}
+                    getOptionLabel={(option) => option.name}
+                    value={mechanics.filter((m) => field.value?.includes(m.id))}
+                    onChange={(_, value) => field.onChange(value.map((m) => m.id))}
+                    renderTags={(value, getTagProps) =>
+                      value.map((option, index) => (
+                        <Chip {...getTagProps({ index })} key={option.id} label={option.name} size="small" />
+                      ))
+                    }
+                    renderInput={(params) => <TextField {...params} label="Assign Mechanics (optional)" />}
+                  />
                 )}
               />
             </Grid>
             <Grid item xs={12}>
-              <TextField fullWidth label="Title" {...register('title', { required: true })} />
+              <TextField
+                fullWidth
+                label="Issue / Problem Title"
+                placeholder="e.g. Brake pads worn, engine warning light"
+                {...register('title', { required: true })}
+              />
             </Grid>
             <Grid item xs={12}>
-              <TextField fullWidth label="Description" multiline rows={2} {...register('description')} />
+              <TextField
+                fullWidth
+                label="Problem Description"
+                multiline
+                rows={3}
+                placeholder="Describe the issue, symptoms, or service needed"
+                {...register('description')}
+              />
             </Grid>
             <Grid item xs={6} sm={4}>
               <Controller
                 name="type"
                 control={control}
                 render={({ field }) => (
-                  <TextField {...field} fullWidth select label="Type">
+                  <TextField {...field} fullWidth select label="Service Type">
                     {Object.values(MAINTENANCE_TYPE).map((t) => (
                       <MenuItem key={t} value={t} sx={{ textTransform: 'capitalize' }}>
                         {t}
@@ -180,66 +186,18 @@ const MaintenanceFormDialog = ({
                 {...register('scheduledDate', { required: true })}
               />
             </Grid>
-            <Grid item xs={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Odometer (km)"
-                inputProps={decimalInputProps()}
-                {...register('odometerAtService')}
-              />
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Labor Cost ($)"
-                inputProps={moneyInputProps()}
-                {...register('laborCost')}
-              />
+            <Grid item xs={12}>
+              <TextField fullWidth label="External Service Provider (optional)" {...register('serviceProvider')} />
             </Grid>
             <Grid item xs={12}>
-              <TextField fullWidth label="Service Provider" {...register('serviceProvider')} />
+              <TextField fullWidth label="Scheduling Notes" multiline rows={2} {...register('notes')} />
             </Grid>
           </Grid>
-
-          <Typography variant="subtitle2" fontWeight={700} mt={2} mb={1}>
-            Parts
-          </Typography>
-          {fields.map((field, index) => (
-            <Box key={field.id} display="flex" gap={1} mb={1} alignItems="center">
-              <TextField size="small" label="Part Name" {...register(`parts.${index}.name`)} sx={{ flex: 2 }} />
-              <TextField
-                size="small"
-                type="number"
-                label="Qty"
-                inputProps={integerInputProps(1)}
-                {...register(`parts.${index}.quantity`)}
-                sx={{ width: 80 }}
-              />
-              <TextField
-                size="small"
-                type="number"
-                label="Cost"
-                inputProps={moneyInputProps()}
-                {...register(`parts.${index}.cost`)}
-                sx={{ width: 100 }}
-              />
-              {fields.length > 1 && (
-                <IconButton size="small" color="error" onClick={() => remove(index)}>
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              )}
-            </Box>
-          ))}
-          <Button size="small" startIcon={<AddIcon />} onClick={() => append(defaultPart())}>
-            Add Part
-          </Button>
         </DialogContent>
         <DialogActions>
           <Button onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="contained" disabled={isLoading}>
-            {isEdit ? 'Save' : 'Create'}
+            {isEdit ? 'Save Changes' : 'Schedule Maintenance'}
           </Button>
         </DialogActions>
       </form>

@@ -2,12 +2,14 @@ import { Router } from 'express';
 import { protect } from '../middleware/auth.js';
 import { requirePermission } from '../middleware/authorize.js';
 import validate from '../middleware/validate.js';
+import { documentUpload } from '../middleware/documentUpload.js';
 import { PERMISSIONS } from '../constants/roles.js';
 import * as maintenanceController from '../controllers/maintenanceController.js';
 import {
   createMaintenanceValidator,
   updateMaintenanceValidator,
   maintenanceIdValidator,
+  vehicleIdParamValidator,
   assignMechanicValidator,
   completeMaintenanceValidator,
   listMaintenanceValidator,
@@ -22,6 +24,8 @@ router.get('/upcoming', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), mainten
 router.get('/analytics', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), maintenanceController.getMaintenanceAnalytics);
 router.get('/meta/vehicles', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), maintenanceController.getMetaVehicles);
 router.get('/meta/mechanics', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), maintenanceController.getMetaMechanics);
+router.get('/me/assigned', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), listMaintenanceValidator, validate, maintenanceController.getMyAssignedMaintenance);
+router.get('/vehicle/:vehicleId/logs', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), vehicleIdParamValidator, listMaintenanceValidator, validate, maintenanceController.getVehicleMaintenanceLogs);
 router.get('/export', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), listMaintenanceValidator, validate, maintenanceController.exportCSV);
 router.get('/', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), listMaintenanceValidator, validate, maintenanceController.getMaintenanceRecords);
 
@@ -31,7 +35,15 @@ router.get('/:id', requirePermission(PERMISSIONS.VIEW_MAINTENANCE), maintenanceI
 router.post('/', requirePermission(PERMISSIONS.MANAGE_MAINTENANCE), createMaintenanceValidator, validate, maintenanceController.createMaintenance);
 router.post('/:id/assign', requirePermission(PERMISSIONS.ASSIGN_WORK_ORDERS), assignMechanicValidator, validate, maintenanceController.assignMechanic);
 router.post('/:id/start', requirePermission(PERMISSIONS.MANAGE_MAINTENANCE), maintenanceIdValidator, validate, maintenanceController.startMaintenance);
-router.post('/:id/complete', requirePermission(PERMISSIONS.MANAGE_MAINTENANCE), completeMaintenanceValidator, validate, maintenanceController.completeMaintenance);
+router.post(
+  '/:id/complete',
+  requirePermission(PERMISSIONS.MANAGE_MAINTENANCE),
+  maintenanceIdValidator,
+  documentUpload.array('documents', 10),
+  completeMaintenanceValidator,
+  validate,
+  maintenanceController.completeMaintenance
+);
 router.patch('/:id', requirePermission(PERMISSIONS.MANAGE_MAINTENANCE), updateMaintenanceValidator, validate, maintenanceController.updateMaintenance);
 router.delete('/:id', requirePermission(PERMISSIONS.MANAGE_MAINTENANCE), maintenanceIdValidator, validate, maintenanceController.deleteMaintenance);
 

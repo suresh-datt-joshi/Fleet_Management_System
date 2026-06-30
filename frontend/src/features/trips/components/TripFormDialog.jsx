@@ -38,6 +38,8 @@ const applyPlaceToFields = (setValue, prefix, place) => {
   setValue(`${prefix}Lng`, place.location.lng, { shouldDirty: true });
 };
 
+const normalizeId = (id) => (id == null || id === '' ? '' : String(id));
+
 const TripFormDialog = ({
   open,
   onClose,
@@ -110,6 +112,28 @@ const TripFormDialog = ({
     }
   }, [selectedRouteId, routes, setValue, isEdit]);
 
+  const handleDriverChange = (driverId, fieldOnChange) => {
+    fieldOnChange(driverId);
+    if (!driverId) return;
+
+    const driver = drivers.find((d) => normalizeId(d.id) === normalizeId(driverId));
+    const assignedVehicleId = normalizeId(driver?.assignedVehicleId);
+    if (assignedVehicleId) {
+      setValue('vehicleId', assignedVehicleId, { shouldDirty: true });
+    }
+  };
+
+  const handleVehicleChange = (vehicleId, fieldOnChange) => {
+    fieldOnChange(vehicleId);
+    if (!vehicleId) return;
+
+    const vehicle = vehicles.find((v) => normalizeId(v.id) === normalizeId(vehicleId));
+    const assignedDriverId = normalizeId(vehicle?.assignedDriverId);
+    if (assignedDriverId) {
+      setValue('driverId', assignedDriverId, { shouldDirty: true });
+    }
+  };
+
   const submit = (data) => {
     onSubmit({
       id: initialData?.id,
@@ -145,7 +169,15 @@ const TripFormDialog = ({
                 control={control}
                 rules={{ required: true }}
                 render={({ field }) => (
-                  <TextField {...field} fullWidth select label="Driver" required disabled={isEdit && initialData?.status !== 'scheduled'}>
+                  <TextField
+                    {...field}
+                    fullWidth
+                    select
+                    label="Driver"
+                    required
+                    disabled={isEdit && initialData?.status !== 'scheduled'}
+                    onChange={(e) => handleDriverChange(e.target.value, field.onChange)}
+                  >
                     {drivers.map((d) => (
                       <MenuItem key={d.id} value={d.id}>
                         {d.name} ({d.status.replace('_', ' ')})
@@ -161,7 +193,15 @@ const TripFormDialog = ({
                 control={control}
                 rules={{ required: true }}
                 render={({ field }) => (
-                  <TextField {...field} fullWidth select label="Vehicle" required disabled={isEdit && initialData?.status !== 'scheduled'}>
+                  <TextField
+                    {...field}
+                    fullWidth
+                    select
+                    label="Vehicle"
+                    required
+                    disabled={isEdit && initialData?.status !== 'scheduled'}
+                    onChange={(e) => handleVehicleChange(e.target.value, field.onChange)}
+                  >
                     {vehicles.map((v) => (
                       <MenuItem key={v.id} value={v.id}>
                         {v.vehicleNumber} — {v.model}
@@ -226,7 +266,7 @@ const TripFormDialog = ({
                     {...field}
                     fullWidth
                     type="number"
-                    label="Estimated Cost ($)"
+                    label="Estimated Trip Cost ($)"
                     inputProps={moneyInputProps()}
                     value={field.value ?? ''}
                   />

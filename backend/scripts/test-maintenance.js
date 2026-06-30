@@ -112,15 +112,12 @@ const runTests = async () => {
       type: 'preventive',
       priority: 'medium',
       scheduledDate,
-      assignedMechanicId: mechanicId,
-      laborCost: 120,
-      parts: [{ name: 'Oil Filter', quantity: 1, cost: 25 }, { name: 'Engine Oil 15W-40', quantity: 4, cost: 15 }],
+      assignedMechanicIds: [mechanicId],
       odometerAtService: 85000,
     },
   });
   assert(create.status === 201, 'Create work order', JSON.stringify(create.data));
   workOrderId = create.data.data.record.id;
-  assert(create.data.data.record.cost === 205, 'Total cost calculated');
 
   const list = await request('/maintenance');
   assert(list.status === 200, 'List work orders');
@@ -131,7 +128,7 @@ const runTests = async () => {
 
   const assign = await request(`/maintenance/${workOrderId}/assign`, {
     method: 'POST',
-    body: { mechanicId },
+    body: { mechanicIds: [mechanicId] },
   });
   assert(assign.status === 200, 'Assign mechanic');
 
@@ -145,7 +142,13 @@ const runTests = async () => {
 
   const complete = await request(`/maintenance/${workOrderId}/complete`, {
     method: 'POST',
-    body: { odometerAtService: 85120, laborCost: 130 },
+    body: {
+      workPerformed: 'Changed oil filter and engine oil. Inspected belts and fluid levels.',
+      odometerAtService: 85120,
+      laborHours: 2,
+      laborCost: 130,
+      parts: [{ name: 'Oil Filter', quantity: 1, cost: 25, supplier: 'AutoParts Co' }],
+    },
   });
   assert(complete.status === 200, 'Complete work order');
   assert(complete.data.data.record.status === 'completed', 'Status completed');

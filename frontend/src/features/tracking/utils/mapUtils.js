@@ -13,6 +13,21 @@ L.Icon.Default.mergeOptions({
 export const DEFAULT_MAP_CENTER = [40.7128, -74.006];
 export const DEFAULT_MAP_ZOOM = 12;
 
+export const isValidMapCoordinate = (lat, lng) => {
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+
+  return (
+    Number.isFinite(latNum) &&
+    Number.isFinite(lngNum) &&
+    latNum >= -90 &&
+    latNum <= 90 &&
+    lngNum >= -180 &&
+    lngNum <= 180 &&
+    !(latNum === 0 && lngNum === 0)
+  );
+};
+
 export const createVehicleIcon = (ignition, heading = 0) =>
   L.divIcon({
     className: '',

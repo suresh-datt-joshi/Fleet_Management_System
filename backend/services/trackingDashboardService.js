@@ -1,5 +1,6 @@
 import Trip from '../models/Trip.js';
 import Vehicle from '../models/Vehicle.js';
+import FleetSettings from '../models/FleetSettings.js';
 import GpsLocationHistory from '../models/GpsLocationHistory.js';
 import { TRIP_STATUS, VEHICLE_STATUS } from '../constants/enums.js';
 import * as gpsService from './gpsService.js';
@@ -108,7 +109,7 @@ const buildActiveTripEntry = async (trip, vehicleMap, breadcrumbMap) => {
 };
 
 export const getLiveTrackingDashboard = async () => {
-  const [activeTrips, vehicles, stats] = await Promise.all([
+  const [activeTrips, vehicles, stats, fleetSettings] = await Promise.all([
     Trip.find({ isDeleted: false, status: TRIP_STATUS.IN_PROGRESS })
       .populate('driver', 'firstName lastName email phone status licenseNumber')
       .populate('vehicle', 'vehicleNumber model manufacturer status odometer fuelLevel')
@@ -122,7 +123,15 @@ export const getLiveTrackingDashboard = async () => {
       .populate('assignedDriver', 'firstName lastName employeeId phone')
       .lean(),
     gpsService.getTrackingStats(),
+    FleetSettings.getSingleton(),
   ]);
+
+  const companyLocation = {
+    address: fleetSettings.companyLocation?.address || fleetSettings.companyAddress || '',
+    lat: fleetSettings.companyLocation?.lat ?? null,
+    lng: fleetSettings.companyLocation?.lng ?? null,
+    placeId: fleetSettings.companyLocation?.placeId || '',
+  };
 
   const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle._id.toString(), vehicle]));
   const vehicleIds = activeTrips.map((trip) => trip.vehicle._id);
@@ -193,6 +202,7 @@ export const getLiveTrackingDashboard = async () => {
     },
     activeTrips: formattedActiveTrips,
     vehicles: liveVehicles,
+    companyLocation,
     provider: stats.provider,
     updatedAt: new Date().toISOString(),
   };

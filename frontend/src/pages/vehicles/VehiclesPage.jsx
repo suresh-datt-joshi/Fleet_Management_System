@@ -45,6 +45,12 @@ import {
 import VehicleFormDialog from '../../features/vehicles/components/VehicleFormDialog';
 import VehicleDetailDrawer from '../../features/vehicles/components/VehicleDetailDrawer';
 import AssignDriverDialog from '../../features/vehicles/components/AssignDriverDialog';
+import MaintenanceFormDialog from '../../features/maintenance/components/MaintenanceFormDialog';
+import {
+  useGetMaintenanceMetaVehiclesQuery,
+  useGetMaintenanceMetaMechanicsQuery,
+  useCreateMaintenanceMutation,
+} from '../../redux/api/maintenanceApi';
 import { statusColors, fuelTypeLabels } from '../../features/vehicles/utils/vehicleUtils';
 import ErrorState from '../../components/common/ErrorState';
 import StatCard from '../../features/dashboard/components/StatCard';
@@ -68,6 +74,8 @@ const VehiclesPage = () => {
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignVehicleId, setAssignVehicleId] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [maintenanceFormOpen, setMaintenanceFormOpen] = useState(false);
+  const [scheduleVehicleId, setScheduleVehicleId] = useState(null);
 
   const queryParams = useMemo(
     () => ({
@@ -95,6 +103,9 @@ const VehiclesPage = () => {
   const [uploadImage, { isLoading: uploading }] = useUploadVehicleImageMutation();
   const [deleteImage] = useDeleteVehicleImageMutation();
   const [exportVehicles] = useExportVehiclesMutation();
+  const [createMaintenance, { isLoading: schedulingMaintenance }] = useCreateMaintenanceMutation();
+  const { data: maintenanceVehiclesData } = useGetMaintenanceMetaVehiclesQuery(undefined, { skip: !maintenanceFormOpen });
+  const { data: maintenanceMechanicsData } = useGetMaintenanceMetaMechanicsQuery(undefined, { skip: !maintenanceFormOpen });
 
   const vehicles = data?.data?.vehicles || [];
   const pagination = data?.data?.pagination || {};
@@ -465,7 +476,34 @@ const VehiclesPage = () => {
         canUpdate={hasPermission(PERMISSIONS.UPDATE_VEHICLES)}
         canDelete={hasPermission(PERMISSIONS.DELETE_VEHICLES)}
         canAssign={hasPermission(PERMISSIONS.ASSIGN_VEHICLES)}
+        canScheduleMaintenance={hasPermission(PERMISSIONS.MANAGE_MAINTENANCE)}
+        onScheduleMaintenance={() => {
+          setScheduleVehicleId(detailVehicle._id);
+          setMaintenanceFormOpen(true);
+        }}
         isUploading={uploading}
+      />
+
+      <MaintenanceFormDialog
+        open={maintenanceFormOpen}
+        onClose={() => {
+          setMaintenanceFormOpen(false);
+          setScheduleVehicleId(null);
+        }}
+        onSubmit={async (payload) => {
+          try {
+            await createMaintenance(payload).unwrap();
+            enqueueSnackbar('Maintenance scheduled', { variant: 'success' });
+            setMaintenanceFormOpen(false);
+            setScheduleVehicleId(null);
+          } catch (err) {
+            enqueueSnackbar(err?.data?.message || 'Failed to schedule maintenance', { variant: 'error' });
+          }
+        }}
+        isLoading={schedulingMaintenance}
+        vehicles={maintenanceVehiclesData?.data || []}
+        mechanics={maintenanceMechanicsData?.data || []}
+        presetVehicleId={scheduleVehicleId}
       />
 
       <AssignDriverDialog

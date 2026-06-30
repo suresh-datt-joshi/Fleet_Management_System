@@ -230,6 +230,7 @@ export const MAINTENANCE_HISTORY_ACTIONS = {
   DELETED: 'deleted',
   ASSIGNED: 'mechanic_assigned',
   STARTED: 'started',
+  REPORT_SUBMITTED: 'report_submitted',
   COMPLETED: 'completed',
   STATUS_CHANGED: 'status_changed',
 };

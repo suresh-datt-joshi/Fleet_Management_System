@@ -10,7 +10,8 @@ import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import { useAuth } from '../hooks/useAuth';
-import { ROLE_LABELS } from '../constants';
+import { ROLE_LABELS, USER_ROLES } from '../constants';
+import { usePermissions } from '../hooks/usePermissions';
 import { useGetDashboardOverviewQuery } from '../redux/api/dashboardApi';
 import { formatCurrency, formatNumber } from '../utils/formatters';
 import StatCard from '../features/dashboard/components/StatCard';
@@ -26,8 +27,10 @@ import LiveVehiclesPanel from '../features/dashboard/components/LiveVehiclesPane
 import QuickActions from '../features/dashboard/components/QuickActions';
 import { StatCardSkeleton, ChartSkeleton } from '../components/common/DashboardSkeletons';
 import ErrorState from '../components/common/ErrorState';
+import MechanicDashboardPage from './MechanicDashboardPage';
+import DriverDashboardPage from './DriverDashboardPage';
 
-const DashboardPage = () => {
+const FleetDashboardContent = () => {
   const { user } = useAuth();
   const { data, isLoading, isError, error, refetch, isFetching } = useGetDashboardOverviewQuery();
 
@@ -192,6 +195,20 @@ const DashboardPage = () => {
       </Grid>
     </Box>
   );
+};
+
+const DashboardPage = () => {
+  const { hasRole } = usePermissions();
+
+  if (hasRole(USER_ROLES.MECHANIC)) {
+    return <MechanicDashboardPage />;
+  }
+
+  if (hasRole(USER_ROLES.DRIVER)) {
+    return <DriverDashboardPage />;
+  }
+
+  return <FleetDashboardContent />;
 };
 
 export default DashboardPage;

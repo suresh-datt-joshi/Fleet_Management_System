@@ -20,15 +20,15 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
 import { TRIP_EXPENSE_CATEGORIES } from '../../../constants';
-import { FUEL_TYPES, fuelTypeLabels } from '../../fuel/utils/fuelUtils';
+import { FUEL_TYPES, fuelTypeLabels, estimateTripEndOdometer } from '../../fuel/utils/fuelUtils';
 import { decimalInputProps, moneyInputProps } from '../../../utils/numericInputProps';
 
 const buildEmptyEntry = (trip, overrides = {}) => ({
   quantity: '',
-  cost: '',
+  pricePerUnit: '',
   stationId: '',
   fuelStation: '',
-  odometer: trip?.vehicle?.odometer ?? '',
+  odometer: estimateTripEndOdometer(trip),
   fuelType: trip?.vehicle?.fuelType || FUEL_TYPES.DIESEL,
   receiptNumber: '',
   isFullTank: true,
@@ -51,16 +51,19 @@ const CompleteTripFuelDialog = ({ open, onClose, onSubmit, isLoading, trip, stat
 
     if (fuelExpenses.length > 0) {
       setEntries(
-        fuelExpenses.map((exp) =>
-          buildEmptyEntry(trip, {
-            quantity: exp.fuelQuantity ?? '',
-            cost: exp.amount ?? '',
+        fuelExpenses.map((exp) => {
+          const qty = exp.fuelQuantity ?? '';
+          const ppu =
+            qty && exp.amount ? (Number(exp.amount) / Number(qty)).toFixed(2) : '';
+          return buildEmptyEntry(trip, {
+            quantity: qty,
+            pricePerUnit: ppu,
             fuelStation: exp.vendor || '',
             notes: exp.description || '',
             tripExpenseId: exp.id,
             loggedAt: exp.loggedAt ? new Date(exp.loggedAt).toISOString().slice(0, 16) : buildEmptyEntry(trip).loggedAt,
-          })
-        )
+          });
+        })
       );
       return;
     }
@@ -83,24 +86,31 @@ const CompleteTripFuelDialog = ({ open, onClose, onSubmit, isLoading, trip, stat
   const handleSubmit = (event) => {
     event.preventDefault();
 
-    const fuelLogs = entries.map((entry) => ({
-      quantity: Number(entry.quantity),
-      cost: Number(entry.cost),
-      stationId: entry.stationId || null,
-      fuelStation: entry.fuelStation || '',
-      odometer: Number(entry.odometer || 0),
-      fuelType: entry.fuelType,
-      receiptNumber: entry.receiptNumber || '',
-      isFullTank: entry.isFullTank !== false,
-      notes: entry.notes || '',
-      loggedAt: entry.loggedAt ? new Date(entry.loggedAt).toISOString() : undefined,
-      tripExpenseId: entry.tripExpenseId || null,
-    }));
+    const fuelLogs = entries.map((entry) => {
+      const qty = Number(entry.quantity);
+      const ppu = Number(entry.pricePerUnit);
+      return {
+        quantity: qty,
+        cost: Math.round(qty * ppu * 100) / 100,
+        pricePerUnit: ppu,
+        stationId: entry.stationId || null,
+        fuelStation: entry.fuelStation || '',
+        odometer: Number(entry.odometer || 0),
+        fuelType: entry.fuelType,
+        receiptNumber: entry.receiptNumber || '',
+        isFullTank: entry.isFullTank !== false,
+        notes: entry.notes || '',
+        loggedAt: entry.loggedAt ? new Date(entry.loggedAt).toISOString() : undefined,
+        tripExpenseId: entry.tripExpenseId || null,
+      };
+    });
 
     onSubmit(fuelLogs);
   };
 
-  const isValid = entries.every((entry) => Number(entry.quantity) > 0 && Number(entry.cost) >= 0);
+  const isValid = entries.every(
+    (entry) => Number(entry.quantity) > 0 && entry.pricePerUnit !== '' && Number(entry.pricePerUnit) >= 0
+  );
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -119,8 +129,10 @@ const CompleteTripFuelDialog = ({ open, onClose, onSubmit, isLoading, trip, stat
           </Typography>
 
           {entries.map((entry, index) => {
-            const pricePerUnit =
-              entry.quantity && entry.cost ? (Number(entry.cost) / Number(entry.quantity)).toFixed(2) : '—';
+            const calculatedCost =
+              entry.quantity && entry.pricePerUnit
+                ? (Number(entry.quantity) * Number(entry.pricePerUnit)).toFixed(2)
+                : '—';
 
             return (
               <Box key={`fuel-entry-${index}`} sx={{ mb: index < entries.length - 1 ? 3 : 0 }}>
@@ -178,14 +190,19 @@ const CompleteTripFuelDialog = ({ open, onClose, onSubmit, isLoading, trip, stat
                       fullWidth
                       required
                       type="number"
-                      label="Cost ($)"
+                      label="Price per Unit ($)"
                       inputProps={moneyInputProps()}
-                      value={entry.cost}
-                      onChange={(e) => updateEntry(index, 'cost', e.target.value)}
+                      value={entry.pricePerUnit}
+                      onChange={(e) => updateEntry(index, 'pricePerUnit', e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={4}>
-                    <TextField fullWidth label="Price per Unit" value={`$${pricePerUnit}`} disabled />
+                    <TextField
+                      fullWidth
+                      label="Cost ($)"
+                      value={calculatedCost === '—' ? '—' : `$${calculatedCost}`}
+                      disabled
+                    />
                   </Grid>
                   <Grid item xs={6} sm={4}>
                     <TextField

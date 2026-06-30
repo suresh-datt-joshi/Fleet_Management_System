@@ -42,6 +42,7 @@ const vehicleSchema = new mongoose.Schema(
     },
     fuelLevel: { type: Number, min: 0, max: 100, default: 100 },
     odometer: { type: Number, min: 0, default: 0 },
+    lastServiceDate: { type: Date, default: null },
     assignedDriver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Driver',

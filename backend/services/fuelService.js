@@ -2,6 +2,7 @@ import FuelLog from '../models/FuelLog.js';
 import FuelStation from '../models/FuelStation.js';
 import Vehicle from '../models/Vehicle.js';
 import Driver from '../models/Driver.js';
+import Trip from '../models/Trip.js';
 import Activity from '../models/Activity.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
@@ -12,6 +13,10 @@ const vehiclePopulate = { path: 'vehicle', select: 'vehicleNumber model manufact
 const driverPopulate = { path: 'driver', select: 'firstName lastName employeeId' };
 const stationPopulate = { path: 'station', select: 'name brand city address' };
 const tripPopulate = { path: 'trip', select: 'tripNumber status completedAt' };
+
+let mileageBackfillComplete = false;
+const MILEAGE_CALC_VERSION = 2;
+let mileageBackfillVersion = 0;
 
 const formatFuelLog = (log) => {
   const l = log.toObject ? log.toObject() : log;
@@ -65,6 +70,19 @@ const formatFuelLog = (log) => {
   };
 };
 
+const computeMileageFromBaseline = (odometer, quantity, baselineOdometer) => {
+  if (!odometer || !quantity || quantity <= 0 || baselineOdometer == null) return 0;
+  const distanceKm = odometer - baselineOdometer;
+  if (distanceKm <= 0) return 0;
+  return Math.round((distanceKm / quantity) * 100) / 100;
+};
+
+export const resolveFuelLogOdometer = (providedOdometer, fallbackOdometer = 0) => {
+  const parsed = Number(providedOdometer || 0);
+  if (parsed > 0) return parsed;
+  return Number(fallbackOdometer || 0);
+};
+
 export const calculateMileage = async (vehicleId, odometer, quantity, excludeLogId = null) => {
   if (!odometer || !quantity || quantity <= 0) return 0;
 
@@ -76,13 +94,144 @@ export const calculateMileage = async (vehicleId, odometer, quantity, excludeLog
   };
   if (excludeLogId) filter._id = { $ne: excludeLogId };
 
-  const previousLog = await FuelLog.findOne(filter).sort({ odometer: -1 }).lean();
+  const previousLog = await FuelLog.findOne(filter).sort({ odometer: -1, loggedAt: -1 }).lean();
   if (!previousLog) return 0;
 
-  const distanceKm = odometer - previousLog.odometer;
-  if (distanceKm <= 0) return 0;
+  return computeMileageFromBaseline(odometer, quantity, previousLog.odometer);
+};
 
-  return Math.round((distanceKm / quantity) * 100) / 100;
+export const recalculateVehicleFuelMileage = async (vehicleId) => {
+  const logs = await FuelLog.find({
+    vehicle: vehicleId,
+    isDeleted: false,
+    odometer: { $gt: 0 },
+  })
+    .sort({ odometer: 1, loggedAt: 1, createdAt: 1 })
+    .select('_id odometer quantity isFullTank mileage trip')
+    .lean();
+
+  let lastFullTankOdometer = null;
+
+  for (const log of logs) {
+    const mileage = computeMileageFromBaseline(log.odometer, log.quantity, lastFullTankOdometer);
+    if (log.mileage !== mileage) {
+      await FuelLog.updateOne({ _id: log._id }, { $set: { mileage } });
+      log.mileage = mileage;
+    }
+    if (log.isFullTank) {
+      lastFullTankOdometer = log.odometer;
+    }
+  }
+
+  const tripFallbackLogs = await FuelLog.find({
+    vehicle: vehicleId,
+    isDeleted: false,
+    trip: { $ne: null },
+    mileage: { $lte: 0 },
+    quantity: { $gt: 0 },
+  })
+    .select('_id odometer quantity mileage trip')
+    .lean();
+
+  await applyTripMileageFallback(tripFallbackLogs);
+};
+
+const resolveTripDistanceKm = async (tripId) => {
+  const trip = await Trip.findById(tripId)
+    .populate('route', 'totalDistanceMeters')
+    .select('distance startOdometer route')
+    .lean();
+  if (!trip) return 0;
+
+  if (trip.distance > 0) return trip.distance;
+
+  if (trip.route?.totalDistanceMeters > 0) {
+    return Math.round((trip.route.totalDistanceMeters / 1000) * 100) / 100;
+  }
+
+  if (trip.startOdometer > 0) {
+    const maxFuelLog = await FuelLog.findOne({ trip: tripId, isDeleted: false, odometer: { $gt: 0 } })
+      .sort({ odometer: -1 })
+      .select('odometer')
+      .lean();
+    if (maxFuelLog?.odometer > trip.startOdometer) {
+      return Math.round((maxFuelLog.odometer - trip.startOdometer) * 100) / 100;
+    }
+  }
+
+  return 0;
+};
+
+const applyTripMileageFallback = async (logs) => {
+  const byTrip = new Map();
+
+  for (const log of logs) {
+    if (log.mileage > 0 || !log.trip) continue;
+    const tripId = log.trip.toString();
+    if (!byTrip.has(tripId)) byTrip.set(tripId, []);
+    byTrip.get(tripId).push(log);
+  }
+
+  for (const [tripId, tripLogs] of byTrip) {
+    const distanceKm = await resolveTripDistanceKm(tripId);
+    if (!distanceKm || distanceKm <= 0) continue;
+
+    const totalQty = tripLogs.reduce((sum, log) => sum + (log.quantity || 0), 0);
+    if (totalQty <= 0) continue;
+
+    for (const log of tripLogs) {
+      if (!log.quantity || log.quantity <= 0) continue;
+      const allocatedDistance = distanceKm * (log.quantity / totalQty);
+      const mileage = Math.round((allocatedDistance / log.quantity) * 100) / 100;
+      if (mileage > 0) {
+        await FuelLog.updateOne({ _id: log._id }, { $set: { mileage } });
+      }
+    }
+  }
+};
+
+export const recalculateAllFuelMileage = async () => {
+  const vehicleIds = await FuelLog.distinct('vehicle', { isDeleted: false });
+  await Promise.all(vehicleIds.map((vehicleId) => recalculateVehicleFuelMileage(vehicleId)));
+};
+
+export const finalizeTripFuelLogOdometers = async (trip, userId) => {
+  const vehicle = await Vehicle.findById(trip.vehicle).select('odometer').lean();
+  if (!vehicle) return;
+
+  const startOdometer = vehicle.odometer || 0;
+  const endOdometer =
+    trip.distance > 0
+      ? Math.round((startOdometer + trip.distance) * 100) / 100
+      : startOdometer;
+
+  const tripFuelLogs = await FuelLog.find({
+    trip: trip._id,
+    isDeleted: false,
+  }).sort({ loggedAt: 1, createdAt: 1 });
+
+  if (tripFuelLogs.length === 0) return;
+
+  const count = tripFuelLogs.length;
+  for (let i = 0; i < count; i += 1) {
+    const log = tripFuelLogs[i];
+    const needsUpdate = !log.odometer || log.odometer <= startOdometer;
+    if (!needsUpdate) continue;
+
+    if (count === 1) {
+      log.odometer = endOdometer > startOdometer ? endOdometer : Math.max(log.odometer || 0, startOdometer);
+    } else {
+      const fraction = (i + 1) / count;
+      log.odometer =
+        endOdometer > startOdometer
+          ? Math.round((startOdometer + (endOdometer - startOdometer) * fraction) * 100) / 100
+          : Math.max(log.odometer || 0, startOdometer);
+    }
+    log.updatedBy = userId;
+    await log.save();
+  }
+
+  await recalculateVehicleFuelMileage(trip.vehicle);
 };
 
 const resolveStationName = async (stationId, fallback = '') => {
@@ -132,6 +281,12 @@ const buildLogFilter = (query) => {
 };
 
 export const getFuelLogs = async (query) => {
+  if (!mileageBackfillComplete || mileageBackfillVersion < MILEAGE_CALC_VERSION) {
+    await recalculateAllFuelMileage();
+    mileageBackfillComplete = true;
+    mileageBackfillVersion = MILEAGE_CALC_VERSION;
+  }
+
   const { page, limit, skip, sort } = getPagination(query);
   const filter = buildLogFilter(query);
 
@@ -177,10 +332,9 @@ export const createFuelLog = async (data, userId) => {
 
   const quantity = Number(data.quantity);
   const cost = Number(data.cost);
-  const odometer = Number(data.odometer || 0);
+  const odometer = resolveFuelLogOdometer(data.odometer, vehicle.odometer);
   const pricePerUnit = data.pricePerUnit ?? (quantity > 0 ? cost / quantity : 0);
 
-  const mileage = await calculateMileage(vehicle._id, odometer, quantity);
   const stationName = await resolveStationName(data.stationId, data.fuelStation || '');
 
   const log = await FuelLog.create({
@@ -193,7 +347,7 @@ export const createFuelLog = async (data, userId) => {
     cost,
     pricePerUnit: Math.round(pricePerUnit * 100) / 100,
     odometer,
-    mileage,
+    mileage: 0,
     fuelStation: stationName,
     fuelType: data.fuelType || vehicle.fuelType,
     receiptNumber: data.receiptNumber || '',
@@ -205,6 +359,7 @@ export const createFuelLog = async (data, userId) => {
   });
 
   await syncVehicleOdometer(vehicle._id, odometer);
+  await recalculateVehicleFuelMileage(vehicle._id);
   await logActivity(vehicle, quantity, cost, userId, log._id);
 
   const populated = await FuelLog.findById(log._id)
@@ -221,6 +376,14 @@ export const createFuelLogsForTripCompletion = async (trip, fuelLogs = [], userI
   if (!Array.isArray(fuelLogs) || fuelLogs.length === 0) {
     throw new AppError('At least one fuel log entry is required to complete the trip', 400);
   }
+
+  const vehicle = await Vehicle.findById(trip.vehicle).select('odometer').lean();
+  const startOdometer = vehicle?.odometer || 0;
+  const endOdometer =
+    trip.distance > 0
+      ? Math.round((startOdometer + trip.distance) * 100) / 100
+      : startOdometer;
+  const defaultOdometer = endOdometer > startOdometer ? endOdometer : startOdometer;
 
   const created = [];
   for (const entry of fuelLogs) {
@@ -241,6 +404,7 @@ export const createFuelLogsForTripCompletion = async (trip, fuelLogs = [], userI
     const log = await createFuelLog(
       {
         ...entry,
+        odometer: resolveFuelLogOdometer(entry.odometer, defaultOdometer),
         vehicleId: trip.vehicle,
         driverId: trip.driver,
         tripId: trip._id,
@@ -250,12 +414,16 @@ export const createFuelLogsForTripCompletion = async (trip, fuelLogs = [], userI
     created.push(log);
   }
 
+  await finalizeTripFuelLogOdometers(trip, userId);
+
   return created;
 };
 
 export const updateFuelLog = async (id, data, userId) => {
   const log = await FuelLog.findOne({ _id: id, isDeleted: false });
   if (!log) throw new AppError('Fuel log not found', 404);
+
+  const previousVehicleId = log.vehicle;
 
   if (data.vehicleId && data.vehicleId !== log.vehicle.toString()) {
     const vehicle = await Vehicle.findOne({ _id: data.vehicleId, isDeleted: false });
@@ -271,7 +439,7 @@ export const updateFuelLog = async (id, data, userId) => {
     log.fuelStation = data.fuelStation;
   }
 
-  ['quantity', 'cost', 'odometer', 'fuelType', 'receiptNumber', 'notes'].forEach((field) => {
+  ['quantity', 'cost', 'fuelType', 'receiptNumber', 'notes'].forEach((field) => {
     if (data[field] !== undefined) log[field] = data[field];
   });
 
@@ -283,11 +451,18 @@ export const updateFuelLog = async (id, data, userId) => {
       log.quantity > 0 ? Math.round((log.cost / log.quantity) * 100) / 100 : log.pricePerUnit;
   }
 
-  log.mileage = await calculateMileage(log.vehicle, log.odometer, log.quantity, log._id);
+  if (data.odometer !== undefined) {
+    log.odometer = resolveFuelLogOdometer(data.odometer, log.odometer);
+  }
+
   log.updatedBy = userId;
   await log.save();
 
   await syncVehicleOdometer(log.vehicle, log.odometer);
+  await recalculateVehicleFuelMileage(log.vehicle);
+  if (data.vehicleId && data.vehicleId !== previousVehicleId.toString()) {
+    await recalculateVehicleFuelMileage(previousVehicleId);
+  }
 
   const populated = await FuelLog.findById(log._id)
     .populate(vehiclePopulate)
@@ -302,10 +477,13 @@ export const deleteFuelLog = async (id, userId) => {
   const log = await FuelLog.findOne({ _id: id, isDeleted: false });
   if (!log) throw new AppError('Fuel log not found', 404);
 
+  const vehicleId = log.vehicle;
   log.isDeleted = true;
   log.deletedAt = new Date();
   log.updatedBy = userId;
   await log.save();
+
+  await recalculateVehicleFuelMileage(vehicleId);
 
   return { message: 'Fuel log deleted successfully' };
 };
@@ -529,4 +707,8 @@ export default {
   getMetaVehicles,
   exportFuelLogsCSV,
   calculateMileage,
+  recalculateVehicleFuelMileage,
+  recalculateAllFuelMileage,
+  finalizeTripFuelLogOdometers,
+  resolveFuelLogOdometer,
 };

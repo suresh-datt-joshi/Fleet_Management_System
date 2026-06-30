@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Box, Chip, Typography } from '@mui/material';
-import { createVehicleIcon, DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, fitBoundsToPoints } from '../utils/mapUtils';
+import { createVehicleIcon, DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, fitBoundsToPoints, isValidMapCoordinate } from '../utils/mapUtils';
 import { useGoogleMaps } from '../../../contexts/GoogleMapsProvider';
 import GoogleTrackingMap from '../../maps/components/GoogleTrackingMap';
 
@@ -13,7 +13,14 @@ const stopIcon = L.divIcon({
   iconAnchor: [6, 6],
 });
 
-const MapBoundsUpdater = ({ vehicles, route, plannedPath, selectedVehicleId }) => {
+const companyIcon = L.divIcon({
+  className: '',
+  html: '<div style="width:28px;height:28px;border-radius:50%;background:#1565C0;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700">HQ</div>',
+  iconSize: [28, 28],
+  iconAnchor: [14, 14],
+});
+
+const MapBoundsUpdater = ({ vehicles, route, plannedPath, selectedVehicleId, companyLocation, hasActiveTrips }) => {
   const map = useMap();
 
   useEffect(() => {
@@ -21,13 +28,19 @@ const MapBoundsUpdater = ({ vehicles, route, plannedPath, selectedVehicleId }) =
       fitBoundsToPoints(map, route?.length ? route : plannedPath);
       return;
     }
-    if (vehicles?.length) {
-      fitBoundsToPoints(
-        map,
-        vehicles.map((v) => v.location)
-      );
+    if (hasActiveTrips && vehicles?.length) {
+      const validLocations = vehicles
+        .map((vehicle) => vehicle.location)
+        .filter((location) => isValidMapCoordinate(location?.lat, location?.lng));
+      if (validLocations.length) {
+        fitBoundsToPoints(map, validLocations);
+        return;
+      }
     }
-  }, [map, vehicles, route, plannedPath, selectedVehicleId]);
+    if (!hasActiveTrips && isValidMapCoordinate(companyLocation?.lat, companyLocation?.lng)) {
+      map.setView([companyLocation.lat, companyLocation.lng], DEFAULT_MAP_ZOOM);
+    }
+  }, [map, vehicles, route, plannedPath, selectedVehicleId, companyLocation, hasActiveTrips]);
 
   return null;
 };
@@ -51,19 +64,32 @@ const LeafletTrackingMap = ({
   stopMarkers = [],
   selectedVehicleId,
   selectedVehicle,
+  companyLocation = null,
+  hasActiveTrips = false,
   geofencePlacementMode = false,
   onMapClick,
   height = 520,
 }) => {
   const center = useMemo(() => {
-    if (selectedVehicle?.location) {
+    if (
+      selectedVehicle?.location &&
+      isValidMapCoordinate(selectedVehicle.location.lat, selectedVehicle.location.lng)
+    ) {
       return [selectedVehicle.location.lat, selectedVehicle.location.lng];
     }
-    if (vehicles[0]?.location) {
-      return [vehicles[0].location.lat, vehicles[0].location.lng];
+    if (hasActiveTrips) {
+      const firstLocatedVehicle = vehicles.find((vehicle) =>
+        isValidMapCoordinate(vehicle.location?.lat, vehicle.location?.lng)
+      );
+      if (firstLocatedVehicle) {
+        return [firstLocatedVehicle.location.lat, firstLocatedVehicle.location.lng];
+      }
+    }
+    if (isValidMapCoordinate(companyLocation?.lat, companyLocation?.lng)) {
+      return [companyLocation.lat, companyLocation.lng];
     }
     return DEFAULT_MAP_CENTER;
-  }, [selectedVehicle, vehicles]);
+  }, [selectedVehicle, vehicles, companyLocation, hasActiveTrips]);
 
   const routePositions = useMemo(() => route.map((p) => [p.lat, p.lng]), [route]);
   const plannedPositions = useMemo(() => plannedPath.map((p) => [p.lat, p.lng]), [plannedPath]);
@@ -89,6 +115,8 @@ const LeafletTrackingMap = ({
           route={route}
           plannedPath={plannedPath}
           selectedVehicleId={selectedVehicleId}
+          companyLocation={companyLocation}
+          hasActiveTrips={hasActiveTrips}
         />
         <MapClickHandler enabled={geofencePlacementMode} onMapClick={onMapClick} />
 
@@ -132,8 +160,23 @@ const LeafletTrackingMap = ({
           </Marker>
         ))}
 
+        {!hasActiveTrips && isValidMapCoordinate(companyLocation?.lat, companyLocation?.lng) && (
+          <Marker position={[companyLocation.lat, companyLocation.lng]} icon={companyIcon}>
+            <Popup>
+              <Typography variant="subtitle2" fontWeight={700}>
+                Company Location
+              </Typography>
+              {companyLocation.address && (
+                <Typography variant="caption" display="block">
+                  {companyLocation.address}
+                </Typography>
+              )}
+            </Popup>
+          </Marker>
+        )}
+
         {vehicles.map((vehicle) => {
-          if (!vehicle.location?.lat || !vehicle.location?.lng) return null;
+          if (!isValidMapCoordinate(vehicle.location?.lat, vehicle.location?.lng)) return null;
           const isSelected = vehicle.id === selectedVehicleId;
           return (
             <Marker

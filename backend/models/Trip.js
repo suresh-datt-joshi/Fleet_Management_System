@@ -58,6 +58,7 @@ const tripSchema = new mongoose.Schema(
     startedAt: { type: Date, default: null },
     completedAt: { type: Date, default: null },
     distance: { type: Number, min: 0, default: 0 },
+    startOdometer: { type: Number, min: 0, default: null },
     estimatedCost: { type: Number, min: 0, default: 0 },
     fuelUsed: { type: Number, min: 0, default: 0 },
     revenue: { type: Number, min: 0, default: 0 },
