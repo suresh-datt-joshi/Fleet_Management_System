@@ -148,7 +148,7 @@ const VehicleFormDialog = ({ open, onClose, onSubmit, vehicle, isLoading }) => {
                 control={control}
                 label="Fuel Level (%)"
                 type="number"
-                inputProps={{ min: 0, max: 100, step: 'any' }}
+                inputProps={{ min: 0, max: 100, step: 1 }}
               />
             </Grid>
           </Grid>

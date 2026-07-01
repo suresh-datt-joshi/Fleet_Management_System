@@ -33,6 +33,7 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import LocalGasStationIcon from '@mui/icons-material/LocalGasStation';
+import EngineeringIcon from '@mui/icons-material/Engineering';
 import BuildIcon from '@mui/icons-material/Build';
 import DescriptionIcon from '@mui/icons-material/Description';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
@@ -54,6 +55,7 @@ const allNavItems = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
   { label: 'Vehicles', path: '/vehicles', icon: <LocalShippingIcon />, permission: PERMISSIONS.VIEW_VEHICLES },
   { label: 'Drivers', path: '/drivers', icon: <PeopleIcon />, permission: PERMISSIONS.VIEW_DRIVERS },
+  { label: 'Mechanics', path: '/mechanics', icon: <EngineeringIcon />, permission: PERMISSIONS.VIEW_MECHANICS },
   { label: 'Tracking', path: '/tracking', icon: <GpsFixedIcon />, permission: PERMISSIONS.VIEW_TRACKING },
   { label: 'Routes', path: '/routes', icon: <RouteIcon />, permission: PERMISSIONS.VIEW_TRIPS },
   { label: 'Trips', path: '/trips', icon: <CommuteIcon />, permission: PERMISSIONS.VIEW_TRIPS },

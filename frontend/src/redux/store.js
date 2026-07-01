@@ -5,6 +5,7 @@ import './api/authApi';
 import './api/dashboardApi';
 import './api/vehiclesApi';
 import './api/driversApi';
+import './api/mechanicsApi';
 import './api/trackingApi';
 import './api/routesApi';
 import './api/fuelApi';

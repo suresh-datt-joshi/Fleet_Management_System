@@ -12,6 +12,22 @@ export const DRIVER_STATUS = {
   SUSPENDED: 'suspended',
 };
 
+export const MECHANIC_STATUS = {
+  AVAILABLE: 'available',
+  ON_JOB: 'on_job',
+  OFF_DUTY: 'off_duty',
+  UNAVAILABLE: 'unavailable',
+};
+
+export const MECHANIC_SPECIALIZATIONS = {
+  GENERAL: 'general',
+  ENGINE: 'engine',
+  ELECTRICAL: 'electrical',
+  BODY: 'body',
+  BRAKES: 'brakes',
+  TRANSMISSION: 'transmission',
+};
+
 export const TRIP_STATUS = {
   SCHEDULED: 'scheduled',
   IN_PROGRESS: 'in_progress',
@@ -180,6 +196,9 @@ export const ACTIVITY_TYPES = {
   DRIVER_DELETED: 'driver_deleted',
   DRIVER_ASSIGNED: 'driver_assigned',
   DRIVER_UNASSIGNED: 'driver_unassigned',
+  MECHANIC_ADDED: 'mechanic_added',
+  MECHANIC_UPDATED: 'mechanic_updated',
+  MECHANIC_DELETED: 'mechanic_deleted',
   MAINTENANCE_SCHEDULED: 'maintenance_scheduled',
   MAINTENANCE_STARTED: 'maintenance_started',
   MAINTENANCE_COMPLETED: 'maintenance_completed',
@@ -198,6 +217,16 @@ export const DRIVER_HISTORY_ACTIONS = {
   DELETED: 'deleted',
   VEHICLE_ASSIGNED: 'vehicle_assigned',
   VEHICLE_UNASSIGNED: 'vehicle_unassigned',
+  STATUS_CHANGED: 'status_changed',
+  DOCUMENT_ADDED: 'document_added',
+  DOCUMENT_REMOVED: 'document_removed',
+  AVATAR_UPDATED: 'avatar_updated',
+};
+
+export const MECHANIC_HISTORY_ACTIONS = {
+  CREATED: 'created',
+  UPDATED: 'updated',
+  DELETED: 'deleted',
   STATUS_CHANGED: 'status_changed',
   DOCUMENT_ADDED: 'document_added',
   DOCUMENT_REMOVED: 'document_removed',
@@ -269,6 +298,8 @@ export const TRIP_HISTORY_ACTIONS = {
 export default {
   VEHICLE_STATUS,
   DRIVER_STATUS,
+  MECHANIC_STATUS,
+  MECHANIC_SPECIALIZATIONS,
   TRIP_STATUS,
   MAINTENANCE_STATUS,
   MAINTENANCE_TYPE,

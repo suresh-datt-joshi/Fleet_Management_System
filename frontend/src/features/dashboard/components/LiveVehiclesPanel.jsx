@@ -53,7 +53,7 @@ const LiveVehiclesPanel = ({ vehicles = [] }) => (
                 </Typography>
                 <Box display="flex" gap={1} mt={1} flexWrap="wrap">
                   <Chip label={`${vehicle.speed} mph`} size="small" variant="outlined" />
-                  <Chip label={`${vehicle.fuelLevel}% fuel`} size="small" variant="outlined" color={vehicle.fuelLevel < 20 ? 'error' : 'default'} />
+                  <Chip label={`${Math.round(vehicle.fuelLevel ?? 0)}% fuel`} size="small" variant="outlined" color={vehicle.fuelLevel < 20 ? 'error' : 'default'} />
                   <Chip
                     label={vehicle.engineStatus}
                     size="small"

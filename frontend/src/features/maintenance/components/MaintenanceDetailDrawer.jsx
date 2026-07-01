@@ -52,8 +52,10 @@ const MaintenanceDetailDrawer = ({
   onAssign,
   onStart,
   onComplete,
+  onDelete,
   canManage,
   canAssign,
+  canDelete: canDeleteRecord,
   loadingAction,
   user,
 }) => {
@@ -180,6 +182,11 @@ const MaintenanceDetailDrawer = ({
                 onClick={() => onComplete(record)}
               >
                 Submit Report
+              </Button>
+            )}
+            {canDeleteRecord && (
+              <Button size="small" variant="outlined" color="error" onClick={() => onDelete(record.id)}>
+                Delete
               </Button>
             )}
           </Box>

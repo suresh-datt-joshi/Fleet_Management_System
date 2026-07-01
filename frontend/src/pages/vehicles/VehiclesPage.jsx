@@ -222,7 +222,7 @@ const VehiclesPage = () => {
         renderCell: (params) => (
           <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
             <Typography variant="body2" color={params.value < 20 ? 'error.main' : 'text.primary'}>
-              {params.value}%
+              {Math.round(params.value ?? 0)}%
             </Typography>
           </Box>
         ),

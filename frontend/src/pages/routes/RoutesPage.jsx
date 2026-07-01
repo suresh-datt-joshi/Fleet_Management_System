@@ -301,7 +301,7 @@ const RoutesPage = () => {
           <StatCard title="Optimized" value={stats?.optimized ?? 0} icon={<AutoFixHighIcon />} color="#7B1FA2" />
         </Grid>
         <Grid item xs={6} sm={3}>
-          <StatCard title="Avg Distance" value={`${stats?.averageDistanceKm ?? 0} km`} icon={<RouteIcon />} color="#ED6C02" />
+          <StatCard title="Avg Area Covered" value={`${stats?.averageAreaCoveredKm ?? 0} km`} icon={<RouteIcon />} color="#ED6C02" />
         </Grid>
       </Grid>
 

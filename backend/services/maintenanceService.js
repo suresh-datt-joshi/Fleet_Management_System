@@ -2,6 +2,7 @@ import MaintenanceRecord from '../models/MaintenanceRecord.js';
 import MaintenanceHistory from '../models/MaintenanceHistory.js';
 import Vehicle from '../models/Vehicle.js';
 import User from '../models/User.js';
+import Mechanic from '../models/Mechanic.js';
 import Activity from '../models/Activity.js';
 import AppError from '../utils/AppError.js';
 import { notifyMaintenanceEvent } from './alertService.js';
@@ -11,6 +12,7 @@ import {
   MAINTENANCE_STATUS,
   MAINTENANCE_TYPE,
   VEHICLE_STATUS,
+  MECHANIC_STATUS,
   ACTIVITY_TYPES,
   MAINTENANCE_HISTORY_ACTIONS,
 } from '../constants/enums.js';
@@ -546,18 +548,24 @@ export const updateMaintenance = async (id, data, userId) => {
   return formatMaintenance(populated);
 };
 
-export const deleteMaintenance = async (id, userId) => {
+export const deleteMaintenance = async (id, userId, user = null) => {
   const record = await MaintenanceRecord.findOne({ _id: id, isDeleted: false });
   if (!record) throw new AppError('Work order not found', 404);
 
-  if ([MAINTENANCE_STATUS.IN_PROGRESS, MAINTENANCE_STATUS.COMPLETED].includes(record.status)) {
+  if (!isManagerRole(user) && [MAINTENANCE_STATUS.IN_PROGRESS, MAINTENANCE_STATUS.COMPLETED].includes(record.status)) {
     throw new AppError('Cannot delete an active or completed work order', 400);
   }
+
+  const wasInProgress = record.status === MAINTENANCE_STATUS.IN_PROGRESS;
 
   record.isDeleted = true;
   record.deletedAt = new Date();
   record.updatedBy = userId;
   await record.save();
+
+  if (wasInProgress) {
+    await setVehicleMaintenanceStatus(record.vehicle, false);
+  }
 
   await logHistory(record._id, MAINTENANCE_HISTORY_ACTIONS.DELETED, `Work order ${record.workOrderNumber} deleted`, userId);
 
@@ -796,20 +804,43 @@ export const getMetaVehicles = async () => {
 };
 
 export const getMetaMechanics = async () => {
-  const mechanics = await User.find({
+  const mechanics = await Mechanic.find({
+    isDeleted: false,
+    status: { $ne: MECHANIC_STATUS.UNAVAILABLE },
+  })
+    .populate('user', 'firstName lastName email isActive')
+    .sort({ firstName: 1 })
+    .lean();
+
+  const fromProfiles = mechanics
+    .filter((m) => m.user && m.user.isActive)
+    .map((m) => ({
+      id: m.user._id,
+      mechanicId: m._id,
+      name: `${m.firstName} ${m.lastName}`,
+      email: m.email || m.user.email,
+      specialization: m.specialization,
+    }));
+
+  const linkedUserIds = new Set(fromProfiles.map((m) => m.id.toString()));
+
+  const legacyUsers = await User.find({
     role: USER_ROLES.MECHANIC,
     isDeleted: false,
     isActive: true,
+    _id: { $nin: [...linkedUserIds] },
   })
     .select('firstName lastName email')
     .sort({ firstName: 1 })
     .lean();
 
-  return mechanics.map((m) => ({
-    id: m._id,
-    name: `${m.firstName} ${m.lastName}`,
-    email: m.email,
+  const fromUsers = legacyUsers.map((u) => ({
+    id: u._id,
+    name: `${u.firstName} ${u.lastName}`,
+    email: u.email,
   }));
+
+  return [...fromProfiles, ...fromUsers].sort((a, b) => a.name.localeCompare(b.name));
 };
 
 export const exportMaintenanceCSV = async (query, user = null) => {

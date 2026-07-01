@@ -1,7 +1,9 @@
 import Route from '../models/Route.js';
 import RouteHistory from '../models/RouteHistory.js';
 import Activity from '../models/Activity.js';
+import FleetSettings from '../models/FleetSettings.js';
 import AppError from '../utils/AppError.js';
+import { haversineDistance } from '../utils/geoUtils.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
 import { optimizeRouteAsync, computeRouteMetricsAsync } from './routeOptimizationService.js';
@@ -146,25 +148,68 @@ export const getRouteById = async (id) => {
   return formatRoute(route);
 };
 
+const collectRoutePoints = (route) => {
+  const points = [];
+  const addPoint = (location) => {
+    const lat = Number(location?.lat);
+    const lng = Number(location?.lng);
+    if (
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      !(lat === 0 && lng === 0)
+    ) {
+      points.push({ lat, lng });
+    }
+  };
+
+  addPoint(route.origin);
+  addPoint(route.destination);
+  (route.stops || []).forEach(addPoint);
+
+  return points;
+};
+
+const getRouteCoverageMeters = (route, companyLat, companyLng) => {
+  const points = collectRoutePoints(route);
+  if (points.length === 0) return 0;
+
+  return Math.max(
+    ...points.map((point) => haversineDistance(companyLng, companyLat, point.lng, point.lat))
+  );
+};
+
+const computeAverageAreaCoveredKm = (routes, companyLat, companyLng) => {
+  if (!Number.isFinite(companyLat) || !Number.isFinite(companyLng) || routes.length === 0) {
+    return 0;
+  }
+
+  const coverageMeters = routes.map((route) => getRouteCoverageMeters(route, companyLat, companyLng));
+  const totalMeters = coverageMeters.reduce((sum, meters) => sum + meters, 0);
+
+  return Number((totalMeters / routes.length / 1000).toFixed(1));
+};
+
 export const getRouteStats = async () => {
   const notDeleted = { isDeleted: false };
-  const [total, active, draft, optimized, avgDistance] = await Promise.all([
+  const [total, active, draft, optimized, routes, fleetSettings] = await Promise.all([
     Route.countDocuments(notDeleted),
     Route.countDocuments({ ...notDeleted, status: ROUTE_STATUS.ACTIVE }),
     Route.countDocuments({ ...notDeleted, status: ROUTE_STATUS.DRAFT }),
     Route.countDocuments({ ...notDeleted, isOptimized: true }),
-    Route.aggregate([
-      { $match: notDeleted },
-      { $group: { _id: null, avg: { $avg: '$totalDistanceMeters' } } },
-    ]),
+    Route.find(notDeleted).select('origin destination stops').lean(),
+    FleetSettings.getSingleton(),
   ]);
+
+  const companyLat = fleetSettings.companyLocation?.lat;
+  const companyLng = fleetSettings.companyLocation?.lng;
+  const averageAreaCoveredKm = computeAverageAreaCoveredKm(routes, companyLat, companyLng);
 
   return {
     total,
     active,
     draft,
     optimized,
-    averageDistanceKm: Number(((avgDistance[0]?.avg || 0) / 1000).toFixed(1)),
+    averageAreaCoveredKm,
     trafficProvider: isGoogleMapsEnabled() ? 'google' : 'mock',
   };
 };

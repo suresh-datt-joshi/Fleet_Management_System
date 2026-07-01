@@ -467,7 +467,7 @@ export const syncAlerts = async (userId = null) => {
         type: ALERT_TYPES.LOW_FUEL,
         severity: vehicle.fuelLevel <= 10 ? ALERT_SEVERITY.CRITICAL : ALERT_SEVERITY.HIGH,
         title: 'Low Fuel Alert',
-        message: `Vehicle ${vehicle.vehicleNumber} fuel level at ${vehicle.fuelLevel}%`,
+        message: `Vehicle ${vehicle.vehicleNumber} fuel level at ${Math.round(vehicle.fuelLevel)}%`,
         vehicle: vehicle._id,
         driver: vehicle.assignedDriver || null,
       },

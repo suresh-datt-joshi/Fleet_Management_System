@@ -7,6 +7,7 @@ import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { USER_ROLES, ROLE_LABELS, ROLE_PERMISSIONS, PERMISSIONS } from '../constants/roles.js';
 import { linkUserToDriverProfile } from '../utils/driverUserLink.js';
+import { linkUserToMechanicProfile } from '../utils/mechanicUserLink.js';
 
 const formatUser = (user) => {
   const u = user.toObject ? user.toObject() : user;
@@ -175,6 +176,7 @@ export const createUser = async (data, actorId, actor) => {
   });
 
   await linkUserToDriverProfile(user);
+  await linkUserToMechanicProfile(user);
 
   return formatUser(user);
 };
@@ -206,6 +208,7 @@ export const updateUser = async (id, data, actorId, actor) => {
   await user.save();
 
   await linkUserToDriverProfile(user);
+  await linkUserToMechanicProfile(user);
 
   return formatUser(user);
 };

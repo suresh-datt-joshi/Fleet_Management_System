@@ -98,7 +98,12 @@ const FuelStationFormDialog = ({ open, onClose, onSubmit, initialData, isLoading
         <DialogContent dividers>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={8}>
-              <TextField fullWidth label="Station Name" {...register('name', { required: true })} />
+              <Controller
+                name="name"
+                control={control}
+                rules={{ required: true }}
+                render={({ field }) => <TextField {...field} fullWidth label="Station Name" required />}
+              />
             </Grid>
             <Grid item xs={12} sm={4}>
               <TextField fullWidth label="Brand" {...register('brand')} />
@@ -119,35 +124,59 @@ const FuelStationFormDialog = ({ open, onClose, onSubmit, initialData, isLoading
               />
             </Grid>
             <Grid item xs={6}>
-              <TextField fullWidth label="City" {...register('city')} />
+              <Controller
+                name="city"
+                control={control}
+                render={({ field }) => <TextField {...field} fullWidth label="City" />}
+              />
             </Grid>
             <Grid item xs={3}>
-              <TextField fullWidth label="State" {...register('state')} />
+              <Controller
+                name="state"
+                control={control}
+                render={({ field }) => <TextField {...field} fullWidth label="State" />}
+              />
             </Grid>
             <Grid item xs={3}>
-              <TextField fullWidth label="Zip" {...register('zipCode')} />
+              <Controller
+                name="zipCode"
+                control={control}
+                render={({ field }) => <TextField {...field} fullWidth label="Zip" />}
+              />
             </Grid>
             <Grid item xs={12}>
               <TextField fullWidth label="Phone" {...register('phone')} />
             </Grid>
             <Grid item xs={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Latitude"
-                inputProps={{ step: 'any' }}
-                {...register('lat')}
-                helperText="Auto-filled when you pick an address"
+              <Controller
+                name="lat"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    fullWidth
+                    type="number"
+                    label="Latitude"
+                    inputProps={{ step: 'any' }}
+                    helperText="Auto-filled when you pick an address"
+                  />
+                )}
               />
             </Grid>
             <Grid item xs={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Longitude"
-                inputProps={{ step: 'any' }}
-                {...register('lng')}
-                helperText="Auto-filled when you pick an address"
+              <Controller
+                name="lng"
+                control={control}
+                render={({ field }) => (
+                  <TextField
+                    {...field}
+                    fullWidth
+                    type="number"
+                    label="Longitude"
+                    inputProps={{ step: 'any' }}
+                    helperText="Auto-filled when you pick an address"
+                  />
+                )}
               />
             </Grid>
             <Grid item xs={12}>

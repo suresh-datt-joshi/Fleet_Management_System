@@ -84,7 +84,7 @@ const OperationalReportPanel = ({ data, isLoading }) => {
               Avg Odometer: {formatNumber(fleet.avgOdometer)} km
             </Typography>
             <Typography variant="body2" py={0.5}>
-              Avg Fuel Level: {fleet.avgFuelLevel}%
+              Avg Fuel Level: {Math.round(fleet.avgFuelLevel ?? 0)}%
             </Typography>
             <Typography variant="body2" py={0.5} color={fleet.lowFuelVehicles > 0 ? 'error.main' : 'text.primary'}>
               Low Fuel Vehicles: {fleet.lowFuelVehicles}

@@ -54,7 +54,10 @@ export const canStart = (status) => ['scheduled', 'overdue'].includes(status);
 export const canComplete = (status) => status === 'in_progress';
 export const canUpdateProgress = (status) => status === 'in_progress';
 export const canEdit = (status) => !['completed', 'in_progress'].includes(status);
-export const canDelete = (status) => !['completed', 'in_progress'].includes(status);
+export const canDelete = (status, isAdmin = false) => {
+  if (isAdmin) return true;
+  return !['completed', 'in_progress'].includes(status);
+};
 
 export const getMechanicNames = (record) => {
   if (record?.assignedMechanics?.length) {

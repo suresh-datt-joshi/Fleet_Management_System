@@ -56,6 +56,31 @@ export const DRIVER_STATUS = {
   SUSPENDED: 'suspended',
 };
 
+export const MECHANIC_STATUS = {
+  AVAILABLE: 'available',
+  ON_JOB: 'on_job',
+  OFF_DUTY: 'off_duty',
+  UNAVAILABLE: 'unavailable',
+};
+
+export const MECHANIC_SPECIALIZATIONS = {
+  GENERAL: 'general',
+  ENGINE: 'engine',
+  ELECTRICAL: 'electrical',
+  BODY: 'body',
+  BRAKES: 'brakes',
+  TRANSMISSION: 'transmission',
+};
+
+export const MECHANIC_SPECIALIZATION_LABELS = {
+  general: 'General',
+  engine: 'Engine',
+  electrical: 'Electrical',
+  body: 'Body Work',
+  brakes: 'Brakes',
+  transmission: 'Transmission',
+};
+
 export const ALERT_TYPES = {
   LOW_FUEL: 'low_fuel',
   OVERSPEED: 'overspeed',
@@ -94,6 +119,10 @@ export const PERMISSIONS = {
   UPDATE_DRIVERS: 'update_drivers',
   DELETE_DRIVERS: 'delete_drivers',
   ASSIGN_DRIVERS: 'assign_drivers',
+  VIEW_MECHANICS: 'view_mechanics',
+  CREATE_MECHANICS: 'create_mechanics',
+  UPDATE_MECHANICS: 'update_mechanics',
+  DELETE_MECHANICS: 'delete_mechanics',
   VIEW_TRACKING: 'view_tracking',
   MANAGE_GEOFENCES: 'manage_geofences',
   VIEW_TRIPS: 'view_trips',

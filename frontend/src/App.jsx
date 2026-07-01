@@ -18,6 +18,7 @@ import PermissionRoute from './components/common/PermissionRoute';
 import DashboardPage from './pages/DashboardPage';
 import VehiclesPage from './pages/vehicles/VehiclesPage';
 import DriversPage from './pages/drivers/DriversPage';
+import MechanicsPage from './pages/mechanics/MechanicsPage';
 import TrackingPage from './pages/tracking/TrackingPage';
 import RoutesPage from './pages/routes/RoutesPage';
 import FuelPage from './pages/fuel/FuelPage';
@@ -95,6 +96,14 @@ function App() {
                     element={
                       <PermissionRoute permission={PERMISSIONS.VIEW_DRIVERS}>
                         <DriversPage />
+                      </PermissionRoute>
+                    }
+                  />
+                  <Route
+                    path="/mechanics"
+                    element={
+                      <PermissionRoute permission={PERMISSIONS.VIEW_MECHANICS}>
+                        <MechanicsPage />
                       </PermissionRoute>
                     }
                   />

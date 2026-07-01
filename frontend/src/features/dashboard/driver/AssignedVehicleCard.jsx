@@ -63,7 +63,7 @@ const AssignedVehicleCard = ({ vehicle }) => {
                 Fuel level
               </Typography>
               <Typography variant="body2" fontWeight={600} ml="auto">
-                {vehicle.fuelLevel}%
+                {Math.round(vehicle.fuelLevel)}%
               </Typography>
             </Box>
           )}

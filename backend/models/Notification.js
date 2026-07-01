@@ -24,7 +24,7 @@ const notificationSchema = new mongoose.Schema(
     },
     entityType: {
       type: String,
-      enum: ['vehicle', 'driver', 'trip', 'route', 'maintenance', 'fuel', 'document', 'alert', 'geofence'],
+      enum: ['vehicle', 'driver', 'mechanic', 'trip', 'route', 'maintenance', 'fuel', 'document', 'alert', 'geofence'],
       default: null,
     },
     entityId: {

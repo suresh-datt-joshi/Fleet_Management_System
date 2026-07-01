@@ -119,7 +119,7 @@ const VehicleDetailDrawer = ({
           <DetailItem label="RC Number" value={vehicle.registrationNumber} />
           <DetailItem label="Odometer" value={`${vehicle.odometer?.toLocaleString()} km`} />
           <DetailItem label="Last Service" value={vehicle.lastServiceDate ? format(new Date(vehicle.lastServiceDate), 'MMM d, yyyy') : '—'} />
-          <DetailItem label="Fuel Level" value={`${vehicle.fuelLevel}%`} />
+          <DetailItem label="Fuel Level" value={`${Math.round(vehicle.fuelLevel ?? 0)}%`} />
         </Grid>
 
         <Divider sx={{ my: 2 }} />

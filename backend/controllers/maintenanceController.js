@@ -57,7 +57,7 @@ export const updateMaintenance = catchAsync(async (req, res) => {
 });
 
 export const deleteMaintenance = catchAsync(async (req, res) => {
-  const result = await maintenanceService.deleteMaintenance(req.params.id, req.user._id);
+  const result = await maintenanceService.deleteMaintenance(req.params.id, req.user._id, req.user);
   res.status(200).json({ success: true, ...result });
 });
 

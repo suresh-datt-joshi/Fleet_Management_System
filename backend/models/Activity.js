@@ -13,7 +13,7 @@ const activitySchema = new mongoose.Schema(
     description: { type: String, default: '' },
     entityType: {
       type: String,
-      enum: ['vehicle', 'driver', 'trip', 'route', 'maintenance', 'fuel', 'document', 'alert'],
+      enum: ['vehicle', 'driver', 'mechanic', 'trip', 'route', 'maintenance', 'fuel', 'document', 'alert'],
       default: 'trip',
     },
     entityId: {

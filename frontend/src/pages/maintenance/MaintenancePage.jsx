@@ -94,6 +94,7 @@ const MaintenancePage = () => {
   const canManage = hasPermission(PERMISSIONS.MANAGE_MAINTENANCE);
   const canAssign = hasPermission(PERMISSIONS.ASSIGN_WORK_ORDERS);
   const isMechanic = hasRole(USER_ROLES.MECHANIC);
+  const isAdmin = hasRole(USER_ROLES.SUPER_ADMIN) || hasRole(USER_ROLES.FLEET_MANAGER);
 
   const [tab, setTab] = useState(isMechanic ? TAB.MY_WORK : TAB.WORK_ORDERS);
   const [page, setPage] = useState(0);
@@ -134,7 +135,7 @@ const MaintenancePage = () => {
     isLoading: myLoading,
     isFetching: myFetching,
     refetch: refetchMy,
-  } = useGetMyAssignedMaintenanceQuery(queryParams, { skip: tab !== TAB.MY_WORK });
+  } = useGetMyAssignedMaintenanceQuery(queryParams, { skip: !isMechanic || tab !== TAB.MY_WORK });
   const { data: vehiclesData } = useGetMaintenanceMetaVehiclesQuery(undefined, { skip: !formOpen });
   const { data: mechanicsData } = useGetMaintenanceMetaMechanicsQuery(undefined, {
     skip: !formOpen && !assignOpen,
@@ -339,7 +340,7 @@ const MaintenancePage = () => {
                   </IconButton>
                 </Tooltip>
               )}
-              {canManage && canDelete(row.status) && !isMechanic && (
+              {canManage && canDelete(row.status, isAdmin) && !isMechanic && (
                 <Tooltip title="Delete">
                   <IconButton size="small" color="error" onClick={() => setDeleteConfirm(row.id)}>
                     <DeleteIcon fontSize="small" />
@@ -351,7 +352,7 @@ const MaintenancePage = () => {
         },
       },
     ],
-    [canManage, handleStart, starting, user, isMechanic]
+    [canManage, handleStart, starting, user, isMechanic, isAdmin]
   );
 
   const handleRefresh = () => {
@@ -414,7 +415,7 @@ const MaintenancePage = () => {
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }} variant="scrollable" scrollButtons="auto">
         {!isMechanic && <Tab value={TAB.WORK_ORDERS} label="Work Orders" />}
-        <Tab value={TAB.MY_WORK} label={isMechanic ? 'My Assignments' : 'My Work Orders'} />
+        {isMechanic && <Tab value={TAB.MY_WORK} label="My Assignments" />}
         <Tab value={TAB.LOGS} label="Maintenance Logs" />
         <Tab value={TAB.UPCOMING} label="Upcoming" />
         {!isMechanic && <Tab value={TAB.ANALYTICS} label="Analytics" />}
@@ -526,8 +527,10 @@ const MaintenancePage = () => {
         onAssign={(r) => { setAssignRecord(r); setAssignOpen(true); }}
         onStart={handleStart}
         onComplete={handleOpenReport}
+        onDelete={(id) => setDeleteConfirm(id)}
         canManage={canManage}
         canAssign={canAssign}
+        canDelete={canManage && !isMechanic && detailRecord && canDelete(detailRecord.status, isAdmin)}
         loadingAction={starting}
         user={user}
       />
@@ -552,7 +555,11 @@ const MaintenancePage = () => {
       <Dialog open={Boolean(deleteConfirm)} onClose={() => setDeleteConfirm(null)}>
         <DialogTitle>Delete Work Order</DialogTitle>
         <DialogContent>
-          <DialogContentText>This work order will be permanently removed.</DialogContentText>
+          <DialogContentText>
+            {isAdmin
+              ? 'This work order will be permanently removed. Completed and in-progress orders can only be deleted by admins.'
+              : 'This work order will be permanently removed.'}
+          </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDeleteConfirm(null)}>Cancel</Button>
