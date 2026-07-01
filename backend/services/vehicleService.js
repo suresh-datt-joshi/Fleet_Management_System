@@ -6,6 +6,7 @@ import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
 import { uploadImage, deleteImage } from '../services/cloudinaryService.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { VEHICLE_STATUS, VEHICLE_HISTORY_ACTIONS, ACTIVITY_TYPES } from '../constants/enums.js';
 import { notifyDriverEvent } from './alertService.js';
 
@@ -43,7 +44,7 @@ const buildFilter = (query) => {
   }
 
   if (query.manufacturer) {
-    filter.manufacturer = new RegExp(query.manufacturer, 'i');
+    filter.manufacturer = new RegExp(escapeRegex(query.manufacturer), 'i');
   }
 
   if (query.fuelType) {
@@ -57,12 +58,13 @@ const buildFilter = (query) => {
   }
 
   if (query.search) {
+    const escapedSearch = escapeRegex(query.search);
     filter.$or = [
-      { vehicleNumber: new RegExp(query.search, 'i') },
-      { model: new RegExp(query.search, 'i') },
-      { manufacturer: new RegExp(query.search, 'i') },
-      { vin: new RegExp(query.search, 'i') },
-      { registrationNumber: new RegExp(query.search, 'i') },
+      { vehicleNumber: new RegExp(escapedSearch, 'i') },
+      { model: new RegExp(escapedSearch, 'i') },
+      { manufacturer: new RegExp(escapedSearch, 'i') },
+      { vin: new RegExp(escapedSearch, 'i') },
+      { registrationNumber: new RegExp(escapedSearch, 'i') },
     ];
   }
 

@@ -11,6 +11,7 @@ import { notifyTripEvent } from './alertService.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import {
   TRIP_STATUS,
   FINANCIALLY_CLOSED_TRIP_STATUSES,
@@ -267,7 +268,7 @@ const buildFilter = (query) => {
   }
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ tripNumber: regex }, { notes: regex }, { 'origin.address': regex }, { 'destination.address': regex }];
   }
 

@@ -6,6 +6,7 @@ import Alert from '../models/Alert.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { uploadFile, deleteFile } from './cloudinaryService.js';
 import {
   DOCUMENT_ENTITY_TYPES,
@@ -149,7 +150,7 @@ const buildFilter = (query) => {
   }
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ title: regex }, { documentNumber: regex }, { description: regex }, { fileName: regex }];
   }
 

@@ -8,6 +8,7 @@ import Alert from '../models/Alert.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { getDashboardSummary } from './dashboardService.js';
 import {
   REPORT_TYPES,
@@ -112,7 +113,7 @@ const TYPE_PERMISSION_MAP = Object.fromEntries(REPORT_CATALOG.map((r) => [r.type
 
 const generateReportNumber = async () => {
   const prefix = `RPT-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}`;
-  const count = await Report.countDocuments({ reportNumber: new RegExp(`^${prefix}`) });
+  const count = await Report.countDocuments({ reportNumber: new RegExp(`^${escapeRegex(prefix)}`) });
   return `${prefix}-${String(count + 1).padStart(4, '0')}`;
 };
 

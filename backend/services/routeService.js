@@ -4,6 +4,7 @@ import Activity from '../models/Activity.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { optimizeRouteAsync, computeRouteMetricsAsync } from './routeOptimizationService.js';
 import { getTrafficConditions } from './mockTrafficService.js';
 import * as mapsService from './mapsService.js';
@@ -114,7 +115,7 @@ const buildFilter = (query) => {
   if (query.trafficLevel) filter.trafficLevel = query.trafficLevel;
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ name: regex }, { routeNumber: regex }, { description: regex }];
   }
 

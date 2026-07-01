@@ -6,6 +6,7 @@ import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
 import { uploadImage, deleteImage } from '../services/cloudinaryService.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { DRIVER_STATUS, DRIVER_HISTORY_ACTIONS, ACTIVITY_TYPES } from '../constants/enums.js';
 import { linkDriverProfileToUser } from '../utils/driverUserLink.js';
 import { notifyDriverEvent } from './alertService.js';
@@ -34,13 +35,14 @@ const buildFilter = (query) => {
   if (query.minScore) filter.performanceScore = { $gte: parseInt(query.minScore, 10) };
 
   if (query.search) {
+    const escapedSearch = escapeRegex(query.search);
     filter.$or = [
-      { firstName: new RegExp(query.search, 'i') },
-      { lastName: new RegExp(query.search, 'i') },
-      { email: new RegExp(query.search, 'i') },
-      { employeeId: new RegExp(query.search, 'i') },
-      { licenseNumber: new RegExp(query.search, 'i') },
-      { phone: new RegExp(query.search, 'i') },
+      { firstName: new RegExp(escapedSearch, 'i') },
+      { lastName: new RegExp(escapedSearch, 'i') },
+      { email: new RegExp(escapedSearch, 'i') },
+      { employeeId: new RegExp(escapedSearch, 'i') },
+      { licenseNumber: new RegExp(escapedSearch, 'i') },
+      { phone: new RegExp(escapedSearch, 'i') },
     ];
   }
 

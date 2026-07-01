@@ -5,6 +5,7 @@ import Driver from '../models/Driver.js';
 import Trip from '../models/Trip.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { USER_ROLES, ROLE_LABELS, ROLE_PERMISSIONS, PERMISSIONS } from '../constants/roles.js';
 import { linkUserToDriverProfile } from '../utils/driverUserLink.js';
 
@@ -64,7 +65,7 @@ const buildUserFilter = (query) => {
   if (query.isActive !== undefined) filter.isActive = query.isActive === 'true';
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ firstName: regex }, { lastName: regex }, { email: regex }, { phone: regex }];
   }
 

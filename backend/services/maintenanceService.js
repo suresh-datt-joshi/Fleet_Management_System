@@ -7,6 +7,7 @@ import AppError from '../utils/AppError.js';
 import { notifyMaintenanceEvent } from './alertService.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import {
   MAINTENANCE_STATUS,
   MAINTENANCE_TYPE,
@@ -158,7 +159,7 @@ const buildFilter = (query, user = null) => {
   }
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     const searchOr = [{ workOrderNumber: regex }, { title: regex }, { description: regex }];
     if (filter.$or) {
       filter.$and = [{ $or: filter.$or }, { $or: searchOr }];

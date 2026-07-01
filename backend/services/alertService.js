@@ -9,6 +9,7 @@ import Activity from '../models/Activity.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import {
   ALERT_TYPES,
   ALERT_SEVERITY,
@@ -95,7 +96,7 @@ const buildFilter = (query) => {
   if (query.unread === 'true') filter.isRead = false;
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ title: regex }, { message: regex }];
   }
 

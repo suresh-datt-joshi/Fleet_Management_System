@@ -7,6 +7,7 @@ import Activity from '../models/Activity.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { ACTIVITY_TYPES } from '../constants/enums.js';
 
 const vehiclePopulate = { path: 'vehicle', select: 'vehicleNumber model manufacturer fuelType odometer' };
@@ -273,7 +274,7 @@ const buildLogFilter = (query) => {
   if (query.to) filter.loggedAt = { ...filter.loggedAt, $lte: new Date(query.to) };
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ fuelStation: regex }, { receiptNumber: regex }, { notes: regex }];
   }
 

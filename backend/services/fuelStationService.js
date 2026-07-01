@@ -6,6 +6,7 @@ import Activity from '../models/Activity.js';
 import AppError from '../utils/AppError.js';
 import { getPagination, buildPaginationMeta } from '../utils/pagination.js';
 import { objectsToCSV } from '../utils/csvExport.js';
+import { escapeRegex } from '../utils/escapeRegex.js';
 import { FUEL_STATION_STATUS, ACTIVITY_TYPES } from '../constants/enums.js';
 
 const vehiclePopulate = { path: 'vehicle', select: 'vehicleNumber model manufacturer fuelType odometer' };
@@ -39,7 +40,7 @@ const buildStationFilter = (query) => {
   if (query.status) filter.status = query.status;
   if (query.fuelType) filter.fuelTypes = query.fuelType;
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filter.$or = [{ name: regex }, { brand: regex }, { city: regex }, { address: regex }];
   }
   return filter;
